@@ -64,7 +64,6 @@ enum Cmd {
 #[derive(Args)]
 struct InitArgs {
     /// App name for pushit.yaml (default: directory name).
-    #[arg(long)]
     name: Option<String>,
 }
 
@@ -760,14 +759,23 @@ const INIT_INDEX_HTML: &str = r#"<!doctype html>
 
 fn init(args: InitArgs) -> Result<()> {
     let dir = std::env::current_dir()?;
+    let has_name = args.name.is_some();
     let name = args.name.unwrap_or_else(|| {
         dir.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("my-app")
             .to_string()
     });
+    // README workflow: `pushit init myapp && cd myapp` — scaffold into the
+    // named subdirectory; without a name, use the current directory.
+    let dir = if has_name {
+        let target = dir.join(&name);
+        fs::create_dir_all(&target)?;
+        target
+    } else {
+        dir
+    };
     let crate_name = name.replace('-', "_");
-
     let write_new = |rel: &str, content: String| -> Result<()> {
         let path = dir.join(rel);
         if path.exists() {
