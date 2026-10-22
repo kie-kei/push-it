@@ -18,6 +18,8 @@ pushit --dev deploy        # upload and activate
 
 The routine loop is exactly two commands: `pushit build` (or just `pushit deploy` when artifacts are already built) and `pushit --dev deploy`. No extra tooling — the CLI reads `build:` commands out of `pushit.yaml`, so the manifest is both the IaC unit and the build definition.
 
+**Local iteration without a controller:** `pushit dev` runs the component on the *same* wasmtime host as the platform (wasi:sql/blobstore/logging, `local` sqlite, 30s timeout) at `http://127.0.0.1:9101` — `/_fn/*` goes to the component, everything else serves `ui_dist`. Secrets/env: `--env KEY=value`; DSNs for non-`local` sql connections: `--dsn name='postgres://…'`; outgoing HTTP: `--http-out`. Use it for fast function testing; deploy to a real controller to test auth, hub, and revisions.
+
 ## Deploying multiple apps from one manifest (repos + one command)
 
 A **root manifest** lists apps as git repos; `pushit deploy` syncs, builds, and deploys every one of them:

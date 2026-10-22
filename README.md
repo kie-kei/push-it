@@ -35,6 +35,17 @@ curl -H 'Host: myapp.localhost' http://localhost:9100/_fn/hello # функция
 pushit logs myapp
 ```
 
+### Локальная отладка без контроллера
+
+```bash
+pushit dev            # в каталоге приложения: сборка + рантайм на http://127.0.0.1:9101
+pushit dev --env KEY=value --dsn db='postgres://…' --http-out
+```
+
+Тот же wasmtime-рантайм, что и на платформе (wasi:sql/blobstore/logging,
+`local` sqlite, таймауты). Секреты локально передаются через `--env`,
+DSN не-`local` подключений — через `--dsn имя=DSN`.
+
 ## Структура
 
 - `controller/` — Rust-хост: wasmtime, роутинг, OIDC, SQLite, хаб

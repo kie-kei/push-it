@@ -8,6 +8,8 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
+mod dev;
+
 /// Thin client for the PushIt controller API.
 #[derive(Parser)]
 #[command(name = "pushit", version, about = "Deploy and manage PushIt apps")]
@@ -37,6 +39,8 @@ enum Cmd {
     Skill,
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
     Build(BuildArgs),
+    /// Run the app on a local standalone runtime (no controller needed).
+    Dev(dev::DevArgs),
     /// Scaffold pushit.yaml + fn/ + ui/ in the current directory.
     Init(InitArgs),
     /// Build the artifact archive and deploy to the controller.
@@ -142,6 +146,7 @@ fn main() -> Result<()> {
             },
         ),
         Cmd::Build(a) => build(&a),
+        Cmd::Dev(a) => dev::run(&a),
         Cmd::Init(a) => init(a),
         Cmd::Deploy(a) => deploy(&server, &client, a),
         Cmd::Secret(s) => secret(&server, &client, s),

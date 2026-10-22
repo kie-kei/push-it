@@ -9,3 +9,5 @@ pub mod secrets;
 pub mod sql_host;
 pub mod log_host;
 pub mod server;
+
+pub use wasmtime_wasi_http;

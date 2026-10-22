@@ -3118,10 +3118,16 @@ dependencies = [
  "anyhow",
  "clap",
  "flate2",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "mime_guess",
+ "pushit-controller",
  "reqwest 0.12.28",
  "serde_json",
  "serde_yaml",
  "tar",
+ "tokio",
 ]
 
 [[package]]
