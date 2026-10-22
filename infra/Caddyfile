@@ -1,0 +1,18 @@
+{
+	# Internal CA for *.apps.internal.lan; disable for plain-HTTP dev
+	local_certs
+}
+
+# Keycloak
+auth.apps.internal.lan {
+	reverse_proxy keycloak:8080
+}
+
+# All app traffic (incl. hub.apps.internal.lan) → controller.
+# Controller routes by Host; forward-auth is enforced by checking
+# the session via Keycloak — simplest working variant: oauth2-proxy
+# or Caddy forward_auth to an auth endpoint. MVP: controller validates
+# JWT/session itself for API; app GET requests carry the hub session cookie.
+*.apps.internal.lan {
+	reverse_proxy controller:9100
+}

@@ -1,0 +1,16 @@
+{
+  "realm": "pushit",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "pushit-platform",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${PUSHIT_OIDC_CLIENT_SECRET}",
+      "redirectUris": ["https://*.apps.internal.lan/auth/callback", "http://*.localhost/*"],
+      "webOrigins": ["+"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false
+    }
+  ]
+}

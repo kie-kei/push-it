@@ -23,7 +23,7 @@
 | Язык контроллера | **Rust** | wasmtime нативно встраивается; один бинарь; router + host functions + lifecycle |
 | UI | Обычный фронтенд: любой фреймворк + npm, собирается на деплое → `dist/` статика | WASM не рендерит UI — фронт остаётся JS |
 | Reverse proxy + TLS | **Caddy** | TLS из коробки, admin API для динамических роутов |
-| Auth | Keycloak + forward-auth в Caddy (или oauth2-proxy) | Приложения не реализуют auth, получают `X-User` заголовки |
+| Auth | **OIDC внутри контроллера**: auth-code flow → Keycloak realm, подписанная сессионная кука (`Domain=.<base>`), Bearer JWT для API/CLI | Без oauth2-proxy: контроллер сам делает редирект/валидацию, `PUSHIT_DEV=1` — bypass
 | Состояние | SQLite | apps, env refs, история деплоев, warm-instance state |
 | Секреты | **Гибрид**: имена в `pushit.yaml`, значения через CLI/UI → шифрованные в SQLite (age) | В git — только имена. Деплой отклоняется, если секрет не заведён. Компонент получает секреты через env-хост, не через ФС |
 | Логи | stdout/stderr компонента → per-app файл контроллером | `GET /apps/x/logs` API, `tail -f` в CLI |
