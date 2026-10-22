@@ -1,5 +1,8 @@
-# Local test:   docker compose up -d controller      # platform only, http://localhost:9100
-# Full stack:   docker compose --profile edge up -d  # + Caddy (80/443) + Keycloak
+# Local test:   docker compose up -d controller        # platform only, http://localhost:9100
+# Full stack:   docker compose --profile edge up -d    # + Caddy (80/443) + Keycloak
+# External KC:  docker compose --profile edge-external up -d
+#               # + Caddy, Keycloak runs OUTSIDE compose; point Caddy's auth.*
+#               # upstream and controller's PUSHIT_OIDC_* at it manually.
 services:
   controller:
     build: ..
@@ -10,13 +13,18 @@ services:
     environment:
       PUSHIT_DEV: "1"            # dev mode: CLI works with --dev, no OIDC needed
       PUSHIT_BASE_DOMAIN: ${PUSHIT_BASE_DOMAIN:-localhost}
+      # for a real Keycloak (external or edge profile), switch to OIDC:
+      # PUSHIT_DEV: ""            # remove dev mode
+      # PUSHIT_OIDC_ISSUER: https://auth.example.com/realms/pushit
+      # PUSHIT_OIDC_CLIENT_ID: pushit-platform
+      # PUSHIT_OIDC_CLIENT_SECRET: ${PUSHIT_OIDC_CLIENT_SECRET}
     volumes:
       - controller_data:/data
 
   caddy:
     image: caddy:2
     restart: unless-stopped
-    profiles: [edge]
+    profiles: [edge, edge-external]
     ports:
       - "80:80"
       - "443:443"
@@ -24,7 +32,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [controller, keycloak]
+    depends_on: [controller]
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
