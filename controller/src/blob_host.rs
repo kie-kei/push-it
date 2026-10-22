@@ -12,23 +12,32 @@
 //! and `get-container(name)` only allows `name == <logical>` (or an explicit
 //! `container:` value in the entry).
 //!
-//! MVP: object bodies are buffered whole in memory on both read and write.
-//! shortcut: whole-object buffering, real streaming when >100MB objects
-//! are needed — pipe `MemoryInputPipe`/`MemoryOutputPipe` to opendal's
-//! reader/writer then.
+//! Object bodies stream through opendal `Reader`/`Writer` on the async
+//! paths: `incoming-value-consume-async` wraps `Reader::into_stream` in an
+//! `InputStream`, and `outgoing-value-write-body` exposes an `OutputStream`
+//! that buffers small chunks and forwards them to an opendal `Writer`
+//! created when `write-data` binds the value to a key. The sync consume
+//! path still materializes into a `Vec`.
 //!
 //! `created-at` metadata: the draft spec wants creation time; object stores
 //! only give last-modified (opendal `Timestamp`), so that is what we return.
 //! Same for containers: fs mtime, else 0.
 
 use anyhow::{bail, Context as _, Result};
-use opendal::Operator;
+use bytes::Bytes;
+use futures::stream::BoxStream;
+use futures::{StreamExt as _, TryStreamExt as _};
+use opendal::{Buffer, BytesRange, Operator, Writer};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
+use std::sync::Arc;
 use wasmtime::component::Resource;
-use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
-use wasmtime_wasi::p2::IoView;
+use wasmtime_wasi::async_trait;
+use wasmtime_wasi::p2::{
+    DynInputStream, DynOutputStream, InputStream, IoView, OutputStream, Pollable, StreamError,
+    StreamResult,
+};
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -53,14 +62,158 @@ use bindings::wasi::blobstore::types::{
 
 use crate::runtime::ComponentCtx;
 
-/// Host rep of `wasi:blobstore/types.outgoing-value`: a body being written.
-pub struct OutgoingValue {
-    pipe: MemoryOutputPipe,
+/// Shared state between an `outgoing-value` resource and the
+/// `output-stream` handed out by `outgoing-value-write-body`. The tokio
+/// mutex is held across backend writes (async); sync stream accessors use
+/// `try_lock`, which cannot contend: host calls run sequentially.
+struct PendingWrite {
+    /// Bound to a key by `write-data`; `None` = still buffering.
+    writer: Option<Writer>,
+    /// Bytes written through the stream but not yet sent to the backend.
+    buffered: VecDeque<Bytes>,
+    /// Total bytes in `buffered`; permits shrink as it fills.
+    buffered_len: usize,
+    /// Sticky stream error reported to the guest on next access.
+    failed: Option<anyhow::Error>,
 }
 
-/// Host rep of `wasi:blobstore/types.incoming-value`: a fully-read object.
+/// Host rep of `wasi:blobstore/types.outgoing-value`: a body being written.
+pub struct OutgoingValue {
+    st: Arc<tokio::sync::Mutex<PendingWrite>>,
+}
+
+/// Max bytes held in memory for an unbound or stalled outgoing write.
+const WRITE_BUF_CAP: usize = 8 << 20;
+
+/// `InputStream` over `Reader::into_stream`; yields ≤`read(size)` chunks.
+struct OpendalInputStream {
+    stream: BoxStream<'static, opendal::Result<Buffer>>,
+    /// Remainder of the last fetched `Buffer` beyond the requested size.
+    pending: Buffer,
+}
+
+#[async_trait]
+impl Pollable for OpendalInputStream {
+    async fn ready(&mut self) {}
+}
+
+#[async_trait]
+impl InputStream for OpendalInputStream {
+    fn read(&mut self, size: usize) -> StreamResult<Bytes> {
+        // Non-blocking: hand out only what a previous blocking_read left.
+        if self.pending.is_empty() {
+            return Ok(Bytes::new());
+        }
+        Ok(self.pending.split_to(size.min(self.pending.len())).to_bytes())
+    }
+
+    async fn blocking_read(&mut self, size: usize) -> StreamResult<Bytes> {
+        loop {
+            if !self.pending.is_empty() {
+                return Ok(self
+                    .pending
+                    .split_to(size.min(self.pending.len()))
+                    .to_bytes());
+            }
+            match self.stream.next().await {
+                Some(Ok(b)) => self.pending = b,
+                Some(Err(e)) => return Err(StreamError::LastOperationFailed(e.into())),
+                None => return Err(StreamError::Closed),
+            }
+        }
+    }
+}
+
+/// `OutputStream` side of `PendingWrite`: buffers bytes; actual backend
+/// writes happen in `ready()` (async) and at bind/finish time.
+struct OpendalOutputStream {
+    st: Arc<tokio::sync::Mutex<PendingWrite>>,
+}
+
+#[async_trait]
+impl Pollable for OpendalOutputStream {
+    async fn ready(&mut self) {
+        let mut st = self.st.lock().await;
+        while let Some(b) = st.buffered.pop_front() {
+            st.buffered_len -= b.len();
+            let Some(w) = st.writer.as_mut() else {
+                // No writer bound yet: put it back and wait for write-data.
+                st.buffered_len += b.len();
+                st.buffered.push_front(b);
+                return;
+            };
+            if let Err(e) = w.write(Buffer::from(b)).await {
+                st.failed = Some(e.into());
+                return;
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl OutputStream for OpendalOutputStream {
+    fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
+        let mut st = self
+            .st
+            .try_lock()
+            .map_err(|_| StreamError::trap("blob write lock contention"))?;
+        if let Some(e) = &st.failed {
+            return Err(StreamError::LastOperationFailed(anyhow::anyhow!("{e}")));
+        }
+        let permit = WRITE_BUF_CAP.saturating_sub(st.buffered_len);
+        if bytes.len() > permit {
+            return Err(StreamError::trap("write exceeds check-write permit"));
+        }
+        st.buffered_len += bytes.len();
+        st.buffered.push_back(bytes);
+        Ok(())
+    }
+
+    fn flush(&mut self) -> StreamResult<()> {
+        // `ready()` drains the buffer; the write-ready wait in
+        // blocking_write_and_flush observes the completed drain.
+        let st = self
+            .st
+            .try_lock()
+            .map_err(|_| StreamError::trap("blob write lock contention"))?;
+        if let Some(e) = &st.failed {
+            return Err(StreamError::LastOperationFailed(anyhow::anyhow!("{e}")));
+        }
+        Ok(())
+    }
+
+    fn check_write(&mut self) -> StreamResult<usize> {
+        let st = self
+            .st
+            .try_lock()
+            .map_err(|_| StreamError::trap("blob write lock contention"))?;
+        if let Some(e) = &st.failed {
+            return Err(StreamError::LastOperationFailed(anyhow::anyhow!("{e}")));
+        }
+        Ok(WRITE_BUF_CAP.saturating_sub(st.buffered_len))
+    }
+}
+
+/// Host rep of `wasi:blobstore/types.incoming-value`: a resolved object
+/// reference. No body is fetched until a consume call.
 pub struct IncomingValue {
-    bytes: Vec<u8>,
+    op: Operator,
+    key: String,
+    /// Byte range to serve (`u64::MAX` end = to EOF).
+    start: u64,
+    end: u64,
+    /// Size reported by `size()` — the range clamped to the stat'ed length.
+    size: u64,
+}
+
+impl IncomingValue {
+    fn byte_range(&self) -> BytesRange {
+        if self.end == u64::MAX {
+            (self.start..).into()
+        } else {
+            (self.start..=self.end).into()
+        }
+    }
 }
 
 /// Host rep of `wasi:blobstore/container.stream-object-names`.
@@ -257,6 +410,36 @@ fn key(prefix: &str, name: &str) -> String {
         format!("{prefix}{name}")
     }
 }
+/// Stream an object between two (possibly different) operators, chunk by
+/// chunk — the cross-store copy/move fallback.
+async fn copy_stream(src: &Operator, sp: &str, dest: &Operator, dp: &str) -> Result<()> {
+    let reader = src.reader(sp).await?;
+    let mut stream = reader.into_stream(..).await?;
+    let mut w = dest.writer(dp).await?;
+    let mut res = Ok(());
+    while let Some(b) = stream.next().await {
+        match b {
+            Ok(b) => {
+                if let Err(e) = w.write(b).await {
+                    res = Err(e.into());
+                    break;
+                }
+            }
+            Err(e) => {
+                res = Err(e.into());
+                break;
+            }
+        }
+    }
+    if res.is_ok() {
+        res = w.close().await.map(|_| ()).map_err(Into::into);
+    }
+    if res.is_err() {
+        let _ = w.abort().await;
+    }
+    res
+}
+
 
 // ---------- wasi:blobstore/types ----------
 
@@ -265,7 +448,12 @@ impl bindings::wasi::blobstore::types::Host for ComponentCtx {}
 impl bindings::wasi::blobstore::types::HostOutgoingValue for ComponentCtx {
     async fn new_outgoing_value(&mut self) -> Resource<OutgoingValue> {
         let v = OutgoingValue {
-            pipe: MemoryOutputPipe::new(usize::MAX),
+            st: Arc::new(tokio::sync::Mutex::new(PendingWrite {
+                writer: None,
+                buffered: VecDeque::new(),
+                buffered_len: 0,
+                failed: None,
+            })),
         };
         self.table().push(v).unwrap()
     }
@@ -273,22 +461,40 @@ impl bindings::wasi::blobstore::types::HostOutgoingValue for ComponentCtx {
     async fn outgoing_value_write_body(
         &mut self,
         self_: Resource<OutgoingValue>,
-    ) -> Result<Resource<wasmtime_wasi::p2::DynOutputStream>, ()> {
+    ) -> Result<Resource<DynOutputStream>, ()> {
         let v = self.table().get(&self_).map_err(|_| ())?;
-        let s: wasmtime_wasi::p2::DynOutputStream = Box::new(v.pipe.clone());
-        self.table()
-            .push(s)
-            .map_err(|_| ())
+        let s: DynOutputStream = Box::new(OpendalOutputStream { st: v.st.clone() });
+        self.table().push(s).map_err(|_| ())
     }
 
     async fn finish(&mut self, this: Resource<OutgoingValue>) -> Result<(), String> {
-        // The body is already fully buffered; nothing to flush. Drop rep.
-        self.table().delete(this).map_err(|e| e.to_string())?;
+        // Seal the pending write: flush leftovers, then close the writer —
+        // opendal writers only commit on close().
+        let v = self.table().delete(this).map_err(|e| e.to_string())?;
+        let mut st = v.st.lock().await;
+        if let Some(e) = &st.failed {
+            return Err(format!("write failed: {e}"));
+        }
+        let Some(mut w) = st.writer.take() else {
+            return Err("finish: value never bound by write-data".to_string());
+        };
+        while let Some(b) = st.buffered.pop_front() {
+            w.write(Buffer::from(b))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        st.buffered_len = 0;
+        w.close().await.map_err(|e| e.to_string())?;
         Ok(())
     }
 
     async fn drop(&mut self, rep: Resource<OutgoingValue>) -> Result<()> {
-        self.table().delete(rep)?;
+        let v = self.table().delete(rep)?;
+        // Dropping an unfinished value aborts the write.
+        let mut st = v.st.lock().await;
+        if let Some(mut w) = st.writer.take() {
+            let _ = w.abort().await;
+        }
         Ok(())
     }
 }
@@ -298,24 +504,42 @@ impl bindings::wasi::blobstore::types::HostIncomingValue for ComponentCtx {
         &mut self,
         this: Resource<IncomingValue>,
     ) -> Result<Vec<u8>, String> {
+        // Sync consume materializes the object (spec-intended copy).
         let v = self.table().delete(this).map_err(|e| e.to_string())?;
-        Ok(v.bytes)
+        let reader = v.op.reader(&v.key).await.map_err(|e| e.to_string())?;
+        let mut stream = reader
+            .into_stream(v.byte_range())
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(v.size.min(usize::MAX as u64) as usize);
+        while let Some(b) = stream.next().await {
+            let b = b.map_err(|e| e.to_string())?;
+            out.extend_from_slice(&b.to_bytes());
+        }
+        Ok(out)
     }
 
     async fn incoming_value_consume_async(
         &mut self,
         this: Resource<IncomingValue>,
-    ) -> Result<Resource<wasmtime_wasi::p2::DynInputStream>, String> {
+    ) -> Result<Resource<DynInputStream>, String> {
         let v = self.table().delete(this).map_err(|e| e.to_string())?;
-        let s: wasmtime_wasi::p2::DynInputStream =
-            Box::new(MemoryInputPipe::new(v.bytes));
+        let reader = v.op.reader(&v.key).await.map_err(|e| e.to_string())?;
+        let stream = reader
+            .into_stream(v.byte_range())
+            .await
+            .map_err(|e| e.to_string())?;
+        let s: DynInputStream = Box::new(OpendalInputStream {
+            stream: stream.boxed(),
+            pending: Buffer::new(),
+        });
         self.table().push(s).map_err(|e| e.to_string())
     }
 
     async fn size(&mut self, self_: Resource<IncomingValue>) -> u64 {
         self.table()
             .get(&self_)
-            .map(|v: &IncomingValue| v.bytes.len() as u64)
+            .map(|v: &IncomingValue| v.size)
             .unwrap_or(0)
     }
 
@@ -358,20 +582,32 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
         start: u64,
         end: u64,
     ) -> Result<Resource<IncomingValue>, String> {
-        let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        let path = key(&c.prefix, &name);
-        let read = if end == u64::MAX {
-            c.op.read(&path).await.map(|b| b.to_vec())
-        } else {
-            c.op
-                .read_with(&path)
-                .range(start..=end.min(start.saturating_add(u64::MAX - 1)))
-                .await
-                .map(|b| b.to_vec())
+        let (op, path) = {
+            let c = self.table().get(&self_).map_err(|e| e.to_string())?;
+            (c.op.clone(), key(&c.prefix, &name))
         };
-        let bytes = read.map_err(|e| e.to_string())?;
+        // Lazy: stat only, no body download. The range is applied when a
+        // consume call opens the reader.
+        let len = op
+            .stat(&path)
+            .await
+            .map_err(|e| e.to_string())?
+            .content_length();
+        let size = if end < start {
+            0
+        } else if end == u64::MAX {
+            len.saturating_sub(start)
+        } else {
+            (end - start + 1).min(len.saturating_sub(start))
+        };
         self.table()
-            .push(IncomingValue { bytes })
+            .push(IncomingValue {
+                op,
+                key: path,
+                start,
+                end,
+                size,
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -381,16 +617,34 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
         name: String,
         data: Resource<OutgoingValue>,
     ) -> Result<(), String> {
-        let out = self
+        let st = self
             .table()
             .get(&data)
-            .map(|v: &OutgoingValue| v.pipe.contents().to_vec())
+            .map(|v: &OutgoingValue| v.st.clone())
             .map_err(|e| e.to_string())?;
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        c.op.write(&key(&c.prefix, &name), out)
+        let w = c
+            .op
+            .writer(&key(&c.prefix, &name))
             .await
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let mut st = st.lock().await;
+        if st.writer.is_some() {
+            return Err("write-data: outgoing-value already bound".to_string());
+        }
+        // Flush anything the guest wrote before binding, then let the
+        // stream drain straight into the writer from here on.
+        st.writer = Some(w);
+        while let Some(b) = st.buffered.pop_front() {
+            st.buffered_len -= b.len();
+            st.writer
+                .as_mut()
+                .unwrap()
+                .write(Buffer::from(b))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     async fn list_objects(
@@ -405,7 +659,6 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
             .await
             .map_err(|e| e.to_string())?;
         let mut names = Vec::new();
-        use futures::TryStreamExt;
         while let Some(e) = l.try_next().await.map_err(|e| e.to_string())? {
             let p = e.path();
             // skip directory placeholders and the prefix root itself
@@ -558,7 +811,6 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
             .recursive(true)
             .await
             .map_err(|e| e.to_string())?;
-        use futures::TryStreamExt;
         while let Some(e) = l.try_next().await.map_err(|e| e.to_string())? {
             if !e.path().ends_with('/') && e.path() != c.prefix {
                 return Ok(true);
@@ -574,9 +826,10 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
         if s.logical == d.logical {
             return s.op.copy(&sp, &dp).await.map(|_| ()).map_err(|e| e.to_string());
         }
-        // cross-store: read + write fallback
-        let b = s.op.read(&sp).await.map_err(|e| e.to_string())?;
-        d.op.write(&dp, b.to_vec()).await.map(|_| ()).map_err(|e| e.to_string())
+        // cross-store: stream read → write fallback
+        copy_stream(&s.op, &sp, &d.op, &dp)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn move_object(&mut self, src: ObjectId, dest: ObjectId) -> Result<(), String> {
@@ -586,8 +839,9 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
         if s.logical == d.logical {
             return s.op.rename(&sp, &dp).await.map(|_| ()).map_err(|e| e.to_string());
         }
-        let b = s.op.read(&sp).await.map_err(|e| e.to_string())?;
-        d.op.write(&dp, b.to_vec()).await.map_err(|e| e.to_string())?;
+        copy_stream(&s.op, &sp, &d.op, &dp)
+            .await
+            .map_err(|e| e.to_string())?;
         s.op.delete(&sp).await.map(|_| ()).map_err(|e| e.to_string())
     }
 
@@ -710,5 +964,84 @@ mod tests {
         assert_eq!(m.content_length(), 2);
         op.delete_with("a").recursive(true).await.unwrap();
         assert!(!op.exists("a/b.txt").await.unwrap());
+    }
+    #[tokio::test]
+    async fn input_stream_chunks_and_eof() {
+        let dir = tempfile::tempdir().unwrap();
+        let op = operator(&format!("fs://{}", dir.path().display())).unwrap();
+        let body: Vec<u8> = (0..200_000u32).flat_map(|i| i.to_le_bytes()).collect();
+        op.write("big.bin", body.clone()).await.unwrap();
+
+        let reader = op.reader("big.bin").await.unwrap();
+        let stream = reader.into_stream(..).await.unwrap();
+        let mut s = OpendalInputStream {
+            stream: stream.boxed(),
+            pending: Buffer::new(),
+        };
+
+        // Every blocking_read honors the requested size bound.
+        let mut got = Vec::new();
+        loop {
+            match s.blocking_read(64 * 1024).await {
+                Ok(b) => {
+                    assert!(b.len() <= 64 * 1024 && !b.is_empty());
+                    got.extend_from_slice(&b);
+                }
+                Err(StreamError::Closed) => break,
+                Err(e) => panic!("read failed: {e:?}"),
+            }
+        }
+        assert_eq!(got, body);
+    }
+
+    #[tokio::test]
+    async fn output_stream_buffer_then_bind() {
+        let dir = tempfile::tempdir().unwrap();
+        let op = operator(&format!("fs://{}", dir.path().display())).unwrap();
+        let st = Arc::new(tokio::sync::Mutex::new(PendingWrite {
+            writer: None,
+            buffered: VecDeque::new(),
+            buffered_len: 0,
+            failed: None,
+        }));
+        let mut s = OpendalOutputStream { st: st.clone() };
+
+        // Bytes written before the key is bound stay buffered.
+        s.write(Bytes::from_static(b"hello ")).unwrap();
+        s.ready().await; // nothing bound yet: still buffered
+        assert_eq!(st.lock().await.buffered_len, 6);
+
+        // Bind the writer (as write_data does) and drain through it.
+        {
+            let mut g = st.lock().await;
+            g.writer = Some(op.writer("o.txt").await.unwrap());
+            while let Some(b) = g.buffered.pop_front() {
+                g.buffered_len -= b.len();
+                g.writer
+                    .as_mut()
+                    .unwrap()
+                    .write(Buffer::from(b))
+                    .await
+                    .unwrap();
+            }
+        }
+        // Now ready() drains new writes straight to the writer.
+        s.write(Bytes::from_static(b"world")).unwrap();
+        s.ready().await;
+        assert_eq!(st.lock().await.buffered_len, 0);
+
+        let mut w = st.lock().await.writer.take().unwrap();
+        w.close().await.unwrap();
+        assert_eq!(op.read("o.txt").await.unwrap().to_vec(), b"hello world");
+    }
+
+    #[tokio::test]
+    async fn copy_stream_copies_objects() {
+        let dir = tempfile::tempdir().unwrap();
+        let op = operator(&format!("fs://{}", dir.path().display())).unwrap();
+        let body = vec![7u8; 150_000];
+        op.write("a.bin", body.clone()).await.unwrap();
+        copy_stream(&op, "a.bin", &op, "b.bin").await.unwrap();
+        assert_eq!(op.read("b.bin").await.unwrap().to_vec(), body);
     }
 }

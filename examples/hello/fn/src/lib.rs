@@ -98,44 +98,81 @@ fn sql_roundtrip() -> Result<String, String> {
 }
 
 fn blob_roundtrip() -> Result<String, String> {
+    use bindings::wasi::io::streams::StreamError;
     let c = blobstore::get_container("files")?;
 
-    // write object via outgoing-value
+    // Write 32MiB through an output-stream in chunks — proves streaming,
+    // not one buffered blob. A few chunks go out before write-data binds
+    // the key (spec order), the rest stream through the bound writer.
+    const CHUNK: usize = 1 << 20;
+    const TOTAL: u64 = 32 * CHUNK as u64;
     let out = OutgoingValue::new_outgoing_value();
-    let stream = out
+    let body = out
         .outgoing_value_write_body()
         .map_err(|_| "write-body".to_string())?;
-    stream
-        .blocking_write_and_flush(b"blob-roundtrip")
-        .map_err(|e| format!("stream write: {e:?}"))?;
-    drop(stream);
-    c.write_data("hello.txt", &out)?;
+    let mut written = 0u64;
+    for i in 0..4 {
+        let chunk = vec![(i as u8).wrapping_add(0xAB); CHUNK];
+        write_chunk(&body, &chunk)?;
+        written += chunk.len() as u64;
+    }
+    c.write_data("big.bin", &out)?;
+    while written < TOTAL {
+        let chunk = vec![(written / CHUNK as u64) as u8; CHUNK];
+        write_chunk(&body, &chunk)?;
+        written += chunk.len() as u64;
+    }
+    drop(body);
     OutgoingValue::finish(out)?;
 
-    // read it back
-    let inv = c.get_data("hello.txt", 0, u64::MAX)?;
+    // Read back via consume-async, iterating input-stream chunks.
+    let inv = c.get_data("big.bin", 0, u64::MAX)?;
     let size = inv.size();
-    let body = IncomingValue::incoming_value_consume_sync(inv)?;
-    let body = String::from_utf8_lossy(&body).into_owned();
-
-    // list objects
-    let stream = c.list_objects()?;
-    let (mut names, mut done) = stream.read_stream_object_names(64)?;
-    while !done {
-        let (more, d) = stream.read_stream_object_names(64)?;
-        names.extend(more);
-        done = d;
+    let input = IncomingValue::incoming_value_consume_async(inv)?;
+    let mut read = 0u64;
+    loop {
+        match input.blocking_read(CHUNK as u64) {
+            Ok(b) => read += b.len() as u64,
+            Err(StreamError::Closed) => break,
+            Err(e) => return Err(format!("stream read: {e:?}")),
+        }
+    }
+    if size != read {
+        return Err(format!("size {size} != read {read}"));
     }
 
-    let names_json = names
+    // list objects, then clean up
+    let names = c.list_objects()?;
+    let (mut listed, mut done) = names.read_stream_object_names(64)?;
+    while !done {
+        let (more, d) = names.read_stream_object_names(64)?;
+        listed.extend(more);
+        done = d;
+    }
+    c.delete_object("big.bin")?;
+
+    let listed_json = listed
         .iter()
         .map(|n| format!("{n:?}"))
         .collect::<Vec<_>>()
         .join(",");
     Ok(format!(
-        "{{\"body\":{body:?},\"size\":{size},\"names\":[{names_json}],\"exists\":{}}}",
-        c.has_object("hello.txt")?
+        "{{\"written\":{written},\"read\":{read},\"listed\":[{listed_json}]}}"
     ))
+}
+
+// blocking_write_and_flush accepts at most 4096 bytes per call.
+fn write_chunk(
+    s: &bindings::wasi::io::streams::OutputStream,
+    mut b: &[u8],
+) -> Result<(), String> {
+    while !b.is_empty() {
+        let n = b.len().min(4096);
+        s.blocking_write_and_flush(&b[..n])
+            .map_err(|e| format!("stream write: {e:?}"))?;
+        b = &b[n..];
+    }
+    Ok(())
 }
 fn trace(e: Error) -> String {
     e.trace()

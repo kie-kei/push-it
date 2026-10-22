@@ -128,10 +128,13 @@ else
 fi
 
 echo "==> GET /_fn/blob (wasi:blobstore roundtrip)"
-if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/blob" | grep -q 'blob-roundtrip'; then
-  pass "fn blob roundtrip"
+BLOB_JSON="$(curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/blob" || true)"
+BLOB_WRITTEN="$(printf '%s' "$BLOB_JSON" | grep -o '"written":[0-9]*' | cut -d: -f2)"
+BLOB_READ="$(printf '%s' "$BLOB_JSON" | grep -o '"read":[0-9]*' | cut -d: -f2)"
+if [ -n "$BLOB_WRITTEN" ] && [ "$BLOB_WRITTEN" = "$BLOB_READ" ] && [ "$BLOB_READ" -ge 33554432 ]; then
+  pass "fn blob roundtrip (${BLOB_READ} bytes streamed)"
 else
-  fail "fn blob roundtrip"
+  fail "fn blob roundtrip: $BLOB_JSON"
 fi
 
 echo "==> logs endpoint"

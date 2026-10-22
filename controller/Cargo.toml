@@ -29,6 +29,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 mime_guess = "2"
 opendal = { version = "0.59", features = ["services-s3", "services-fs"] }
 futures = "0.3"
+bytes = "1"
 parking_lot = "0.12"
 http = "1"
 hyper = "1"

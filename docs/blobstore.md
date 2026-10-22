@@ -17,8 +17,8 @@ Interfaces `types`, `container`, `blobstore` of `wasi:blobstore@0.2.0-draft`.
 | `blobstore.container-exists(name)` | true if any object exists under the prefix; an empty fixed fs root also counts |
 | `blobstore.copy-object` / `move-object` | opendal `copy`/`rename` when both ids resolve to the same logical store; read+write(+delete) fallback across stores |
 | `container.name` / `info` | authorized name; `created-at` = backend root mtime or 0 |
-| `container.get-data(name, start, end)` | range read (`end` inclusive, `u64::MAX` = whole object) → `incoming-value` |
-| `container.write-data(name, v)` | buffer collected from `outgoing-value` → `write`; call `v.finish()` after |
+| `container.get-data(name, start, end)` | stat-only range handle (`end` inclusive, `u64::MAX` = whole object) → `incoming-value`; body fetched lazily on consume |
+| `container.write-data(name, v)` | binds `v` to key `name`: creates the opendal `Writer`, flushes buffered bytes; further stream writes go straight to the backend. `v.finish()` commits (writer `close`); dropping `v` unfinished aborts |
 | `container.list-objects()` → `stream-object-names` | recursive list, batched cursor (`read-stream-object-names(len)` → `(batch, done)`) |
 | `container.delete-object(s)` / `has-object` / `object-info` / `clear` | delete / exists / metadata (`created-at` = last-modified; spec TODO) / recursive delete |
 
@@ -61,11 +61,19 @@ the container.
 - `s3://bucket[/prefix]?endpoint=&access_key_id=&secret_access_key=&region=&session_token=` —
   S3-compatible. Params are percent-decoded; unknown params ignored.
 
-## MVP limits
+## Limits
 
-- Object bodies are fully buffered in memory on both read and write —
-  fine for internal apps; objects >100MB should get real streaming
-  (marked `shortcut:` in `controller/src/blob_host.rs`).
+- Reads and writes stream through opendal `Reader`/`Writer`
+  (`incoming-value-consume-async`, `outgoing-value-write-body`); the only
+  whole-object copy is `incoming-value-consume-sync`, which is a
+  materializing API by spec.
+- Bytes written to the `output-stream` before `write-data` binds the key
+  are buffered host-side (cap 8MiB — guests writing more than that must
+  call `write-data` first, then stream; the spec's typical order writes
+  after binding anyway).
+- Whether a discarded (un-`finish`ed) write leaves partial data depends
+  on the backend: multipart uploads abort cleanly; backends without an
+  abort concept may leave bytes. No per-op timeouts are applied.
 - `created-at` is last-modified time (object stores don't track creation);
   containers report root mtime or 0. The draft spec has a TODO here.
 - `types.error` is a plain string in this draft (no error resource).
