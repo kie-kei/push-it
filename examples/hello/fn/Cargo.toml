@@ -1,0 +1,21 @@
+[package]
+name = "hello-fn"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wit-bindgen-rt = "0.44"
+
+[lib]
+crate-type = ["cdylib"]
+
+[package.metadata.component]
+package = "pushit:hello-fn"
+
+[package.metadata.component.target.dependencies]
+"wasi:http" = "=0.2.0"
+"wasi:cli" = "=0.2.0"
+
+
+# Standalone crate: detached from the repository's root workspace.
+[workspace]

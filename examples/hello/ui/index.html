@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hello</title>
+<script src="/config.js"></script>
+</head>
+<body>
+<h1>hello</h1>
+<pre id="result">loading…</pre>
+<script>
+  fetch('/_fn/hello')
+    .then(r => r.json())
+    .then(data => { document.getElementById('result').textContent = JSON.stringify(data, null, 2); })
+    .catch(err => { document.getElementById('result').textContent = 'error: ' + err; });
+</script>
+</body>
+</html>
