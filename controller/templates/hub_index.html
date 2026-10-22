@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><title>PushIt</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body><main class="container">
+<h1>PushIt <small>— {{ user }}</small></h1>
+<table>
+<thead><tr><th>app</th><th>domain</th><th>revision</th><th>deployed</th></tr></thead>
+<tbody>
+{% for a in apps %}
+<tr>
+  <td><a href="/apps/{{ a.name }}">{{ a.name }}</a></td>
+  <td><a href="http://{{ a.domain }}">{{ a.domain }}</a></td>
+  <td>{{ a.revision }}</td>
+  <td>{{ a.deployed_at }}</td>
+</tr>
+{% else %}
+<tr><td colspan="4"><em>no apps deployed</em></td></tr>
+{% endfor %}
+</tbody>
+</table>
+</main></body></html>

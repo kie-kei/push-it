@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><title>{{ app.name }} — PushIt</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body><main class="container">
+<p><a href="/">&larr; apps</a></p>
+<h1>{{ app.name }}</h1>
+<p><a href="http://{{ app.domain }}">{{ app.domain }}</a> &middot; created {{ app.created_at }}</p>
+
+<h2>Revisions</h2>
+<table>
+<thead><tr><th>id</th><th>created</th><th>active</th></tr></thead>
+<tbody>
+{% for r in revs %}
+<tr><td>{{ r.id }}</td><td>{{ r.created_at }}</td><td>{% if r.active %}<strong>active</strong>{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Secrets</h2>
+<ul>
+{% for k in secrets %}<li>{{ k }}</li>{% else %}<li><em>none</em></li>{% endfor %}
+</ul>
+<p><em>Set values via <code>pushit secret set {{ app.name }} KEY</code>.</em></p>
+
+<h2>Logs</h2>
+<pre id="log">{% for l in logs %}{{ l }}
+{% endfor %}</pre>
+<script>
+const es = new EventSource('/api/apps/{{ app.name }}/logs/stream');
+es.onmessage = e => { document.getElementById('log').textContent += e.data + "\n"; };
+</script>
+<details><summary>Manifest</summary><pre>{{ app.manifest }}</pre></details>
+</main></body></html>
