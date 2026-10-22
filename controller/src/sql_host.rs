@@ -78,6 +78,10 @@ pub(crate) struct ClickHouse {
 pub struct SqlCtx {
     /// Revision dir — scopes the shared pool cache.
     pub dir: PathBuf,
+    /// Data dir — for `local` database resolution.
+    pub data_dir: PathBuf,
+    /// App name — for `local` database resolution.
+    pub app_name: String,
     /// Names granted by the manifest (`capabilities.sql`).
     pub allowed: Vec<String>,
     /// name → dsn, loaded from `$PUSHIT_DATA/databases.yaml`.
@@ -85,7 +89,6 @@ pub struct SqlCtx {
     /// Shared with `Runtime`: (revision-dir, name) → backend.
     pub(crate) pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<Backend>>>>,
 }
-
 /// name → dsn from `<data_dir>/databases.yaml`; absent file → empty map.
 pub fn load_databases(data_dir: &Path) -> Result<HashMap<String, String>> {
     let path = data_dir.join("databases.yaml");
@@ -388,25 +391,45 @@ impl ComponentCtx {
 
 impl bindings::wasi::sql::types::Host for ComponentCtx {}
 /// Resolve `name` against the manifest grant + databases.yaml.
+/// `local` is a reserved name: auto-resolves to `$PUSHIT_DATA/appdata/<app>/local.db`
+/// (app-scoped sqlite database, no entry in databases.yaml needed).
 fn authorize<'m>(
     name: &str,
     allowed: &'m [String],
     dsns: &'m HashMap<String, String>,
-) -> Result<&'m str, String> {
+) -> Result<Option<&'m str>, String> {
     if !allowed.iter().any(|a| a == name) {
         return Err(format!("connection '{name}' not granted by capabilities.sql"));
     }
+    if name == "local" {
+        return Ok(None); // signal to use built-in local DSN
+    }
     dsns.get(name)
-        .map(|s| s.as_str())
+        .map(|s| Some(s.as_str()))
         .ok_or_else(|| format!("connection '{name}' missing from databases.yaml"))
 }
 
 
 impl bindings::wasi::sql::types::HostConnection for ComponentCtx {
     async fn open(&mut self, name: String) -> Result<Resource<SqlConn>, Resource<SqlError>> {
-        let dsn = match authorize(&name, &self.sql.allowed, &self.sql.dsns) {
-            Ok(d) => d.to_string(),
+        let dsn_opt = match authorize(&name, &self.sql.allowed, &self.sql.dsns) {
+            Ok(opt) => opt,
             Err(msg) => return Err(self.sql_err(msg)),
+        };
+        let dsn = match dsn_opt {
+            Some(d) => d.to_string(),
+            None => {
+                // local: build DSN on the fly using data_dir
+                let db_dir = self.sql.data_dir.join("appdata").join(&self.sql.app_name);
+                if let Err(e) = std::fs::create_dir_all(&db_dir) {
+                    return Err(self.sql_err(format!("failed to create appdata dir: {e}")));
+                }
+                let db_path = db_dir.join("local.db");
+                // sqlx sqlite won't create the file; an empty file is a valid db
+                std::fs::File::create(&db_path)
+                    .map_err(|e| return self.sql_err(format!("failed to create local.db: {e}")))?;
+                format!("sqlite://{}", db_path.display())
+            }
         };
         let key = (self.sql.dir.clone(), name.clone());
         let cached = self.sql.pools.lock().get(&key).cloned();
@@ -564,7 +587,7 @@ mod tests {
         let allowed = vec!["sl".to_string()];
         let mut dsns = HashMap::new();
         dsns.insert("sl".to_string(), "sqlite:///tmp/x.db".to_string());
-        assert_eq!(authorize("sl", &allowed, &dsns).unwrap(), "sqlite:///tmp/x.db");
+        assert_eq!(authorize("sl", &allowed, &dsns).unwrap().unwrap(), "sqlite:///tmp/x.db");
         // not granted
         assert!(authorize("pg", &allowed, &dsns).unwrap_err().contains("not granted"));
         // granted but no dsn configured
@@ -572,6 +595,9 @@ mod tests {
         assert!(authorize("pg", &allowed2, &dsns).unwrap_err().contains("databases.yaml"));
         // granted but nothing configured at all
         assert!(authorize("sl", &allowed, &HashMap::new()).is_err());
+        // local is reserved: granted via manifest, resolves without databases.yaml
+        let allowed3 = vec!["local".to_string()];
+        assert_eq!(authorize("local", &allowed3, &HashMap::new()).unwrap(), None);
     }
 
     #[test]

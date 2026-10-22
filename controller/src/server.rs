@@ -613,6 +613,7 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
     };
     let caps = crate::runtime::HostCaps {
         allow_http_out: manifest.http_out(),
+        data_dir: s.cfg.data_dir.clone(),
         sql_allowed: manifest.capabilities.sql.clone(),
         sql_dsns,
         blob_allowed: manifest.capabilities.blobstore.clone(),
@@ -624,7 +625,7 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
     };
     match s
         .runtime
-        .call(std::path::Path::new(&rev.artifact_dir), env, caps, hreq)
+        .call(std::path::Path::new(&rev.artifact_dir), &app.name, &s.cfg.data_dir, env, caps, hreq)
         .await
     {
         Ok(res) => {

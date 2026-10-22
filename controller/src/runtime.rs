@@ -23,13 +23,13 @@ use crate::sql_host::{self, SqlCtx};
 /// (manifest grants + resource maps + the app log sink).
 pub struct HostCaps {
     pub allow_http_out: bool,
+    pub data_dir: PathBuf,
     pub sql_allowed: Vec<String>,
     pub sql_dsns: HashMap<String, String>,
     pub blob_allowed: Vec<String>,
     pub blob_stores: HashMap<String, blob_host::BlobEntry>,
     pub log: LogCtx,
 }
-
 pub struct ComponentCtx {
     table: ResourceTable,
     wasi: WasiCtx,
@@ -130,10 +130,12 @@ impl Runtime {
     }
 
     /// Invoke incoming-handler for one request. `env` is manifest env +
-    /// secrets (already resolved).
+    /// secrets (already resolved). `app_name` is the app name for `local` DB resolution.
     pub async fn call(
         &self,
         dir: &Path,
+        app_name: &str,
+        data_dir: &Path,
         env: Vec<(String, String)>,
         caps: HostCaps,
         req: hyper::Request<Full<Bytes>>,
@@ -155,6 +157,8 @@ impl Runtime {
                 allow_http_out: caps.allow_http_out,
                 sql: SqlCtx {
                     dir: dir.to_path_buf(),
+                    data_dir: data_dir.to_path_buf(),
+                    app_name: app_name.to_string(),
                     allowed: caps.sql_allowed,
                     dsns: caps.sql_dsns,
                     pools: self.sql_pools.clone(),
@@ -167,7 +171,6 @@ impl Runtime {
             },
         );
         // epoch deadline: 10ms ticks
-        store.epoch_deadline_trap();
         store.set_epoch_deadline((self.timeout.as_millis() / 10) as u64);
 
         let (tx, rx) = tokio::sync::oneshot::channel();

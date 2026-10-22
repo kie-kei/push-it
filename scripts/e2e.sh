@@ -50,12 +50,10 @@ else
   exit 1
 fi
 
-echo "==> write databases.yaml"
+echo "==> write blobstores.yaml"
 mkdir -p "$PUSHIT_DATA"
-printf 'sl: sqlite://%s/hello.db\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/databases.yaml"
+# local database is built-in at $PUSHIT_DATA/appdata/<app>/local.db
 printf 'files: fs://%s/blobs\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/blobstores.yaml"
-# sqlx sqlite won't create the file by default; an empty file is a valid db
-touch "$PUSHIT_DATA/hello.db"
 
 echo "==> start controller"
 PUSHIT_DEV=1 PUSHIT_DATA="$PUSHIT_DATA" "$CONTROLLER_BIN" >/tmp/pushit-e2e-controller.log 2>&1 &

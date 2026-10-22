@@ -62,7 +62,7 @@ impl Guest for Component {
 }
 
 fn sql_roundtrip() -> Result<String, String> {
-    let conn = Connection::open("sl").map_err(trace)?;
+    let conn = Connection::open("local").map_err(trace)?;
     let ddl = Statement::prepare(
         "CREATE TABLE IF NOT EXISTS hello (id INTEGER PRIMARY KEY, msg TEXT)",
         &[],

@@ -57,7 +57,7 @@ Rules that bite when violated:
 
 | Manifest | Guest imports | What it gives |
 |---|---|---|
-| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). DSNs live in controller's `databases.yaml` — credentials never reach the component |
+| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). DSNs live in controller's `databases.yaml` — credentials never reach the component. **`local` is reserved**: app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config needed — declare `sql: [local]` and use `Connection::open("local")`. Data survives redeploys and rollbacks |
 | `capabilities.blobstore: [name]` | `wasi:blobstore` `get-container`, `get-data`, `write-data`, `list-objects`… | Object storage via opendal (s3/fs). Streams objects — fine for large files |
 | (always available) | `wasi:logging` `log(level, ctx, msg)` | Structured lines into `pushit logs <app>` |
 | `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer sql/blobstore interfaces when they cover the service |

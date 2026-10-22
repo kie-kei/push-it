@@ -29,7 +29,9 @@ pub struct Capabilities {
     #[serde(default)]
     pub env: Vec<String>,
     /// Logical connection names this component may open via wasi:sql.
-    /// Names must exist in `$PUSHIT_DATA/databases.yaml`.
+    /// Names must exist in `$PUSHIT_DATA/databases.yaml`, except `local`
+    /// which is reserved for the app-scoped sqlite database
+    /// (`$PUSHIT_DATA/appdata/<app>/local.db`).
     #[serde(default)]
     pub sql: Vec<String>,
     /// Logical blobstore names this component may open via wasi:blobstore.
@@ -58,10 +60,10 @@ impl Manifest {
             if n.trim().is_empty() {
                 bail!("capabilities.sql: connection names must be non-empty");
             }
+            // local is reserved; nothing else to validate
         }
         Ok(m)
     }
-
     fn validate_name(&self, name: &str) -> anyhow::Result<()> {
         if name.is_empty() || name.len() > 63 {
             bail!("name '{name}': must be 1-63 chars");

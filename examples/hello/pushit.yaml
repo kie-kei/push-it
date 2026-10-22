@@ -4,7 +4,7 @@ env:
 secrets:
   - HELLO_SECRET
 capabilities:
-  sql: [sl]
+  sql: [local]
   blobstore: [files]
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip2
