@@ -2,6 +2,20 @@
 
 Внутренняя платформа для деплоя небольших приложений на одну ВМ. Приложения — WASM-компоненты (`wasi:http`) + статичный UI; никаких контейнеров/процессов на приложение. Архитектура: [ARCHITECTURE.md](ARCHITECTURE.md), API: [API.md](API.md).
 
+## Установка CLI
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kie-kei/push-it/master/scripts/install.sh | sh
+```
+
+Требуется Rust (`cargo`); бинарник ставится в `~/.cargo/bin/pushit`.
+
+Удаление:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kie-kei/push-it/master/scripts/uninstall.sh | sh
+```
+
 ## Quickstart (dev)
 
 ```bash
