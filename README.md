@@ -35,6 +35,16 @@ curl -H 'Host: myapp.localhost' http://localhost:9100/_fn/hello # функция
 pushit logs myapp
 ```
 
+### Аутентификация на реальной платформе
+
+```bash
+pushit login    # один раз: браузер → Keycloak → долгоживущий токен (~1 год)
+```
+
+Токен хранится в `~/.config/pushit/token` (0600) и используется автоматически;
+приоритет: `--token` > `PUSHIT_TOKEN` > сохранённый токен > `--dev`.
+Ротация — повторный `pushit login`.
+
 ### Локальная отладка без контроллера
 
 ```bash

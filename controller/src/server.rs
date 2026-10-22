@@ -47,7 +47,9 @@ pub fn router(state: S) -> Router {
             "/api/apps/{name}/secrets/{key}",
             put(api_set_secret).delete(api_delete_secret),
         )
+        .route("/api/tokens", post(api_create_token))
         .route("/api/secrets/global", get(api_list_global_secrets))
+        .route("/auth/device", get(auth_device))
         .route(
             "/api/secrets/global/{key}",
             put(api_set_global_secret).delete(api_delete_global_secret),
@@ -72,7 +74,10 @@ async fn require_api_user(s: &AppState, headers: &HeaderMap) -> Result<User, Res
     }
     match s.auth.verify_bearer(headers).await {
         Ok(Some(u)) => Ok(u),
-        _ => Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response()),
+        _ => match s.auth.verify_api_token(headers) {
+            Some(u) => Ok(u),
+            None => Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response()),
+        },
     }
 }
 
@@ -323,6 +328,58 @@ async fn api_delete_secret(
 }
 
 // platform-wide (global) secrets
+
+/// Mint a long-lived CLI token for the authenticated user.
+async fn api_create_token(
+    State(s): State<S>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    let user = require_api_user(&s, &headers).await?;
+    Ok(axum::Json(serde_json::json!({
+        "token": s.auth.sign_api_token(&user),
+        "user": user.email,
+    }))
+    .into_response())
+}
+
+/// Browser-side step of `pushit login`: the browser carries the session
+/// cookie, the controller bounces the minted long-lived token to the CLI's
+/// localhost listener. Unauthenticated browsers are redirected through
+/// Keycloak first (return_to keeps the query string).
+async fn auth_device(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Query(q): Query<DeviceQuery>,
+) -> Response {
+    let host = host_of(&headers);
+    let user = match require_browser_user(
+        &s,
+        &headers,
+        &host,
+        &format!("/auth/device?port={}", q.port),
+    ) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let token = s.auth.sign_api_token(&user);
+    let url = format!(
+        "http://127.0.0.1:{}/?token={token}&user={}",
+        q.port,
+        crate::auth::urlencoding(&user.email)
+    );
+    Response::builder()
+        .status(StatusCode::FOUND)
+        .header(header::LOCATION, url)
+        .body(Body::empty())
+        .unwrap()
+}
+
+#[derive(Deserialize)]
+struct DeviceQuery {
+    port: u16,
+}
+
+// rollback
 
 async fn api_list_global_secrets(
     State(s): State<S>,

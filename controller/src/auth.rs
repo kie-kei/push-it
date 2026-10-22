@@ -66,7 +66,18 @@ impl Auth {
     // ---- session cookie (HMAC-signed) ----
 
     pub fn sign_session(&self, u: &User) -> String {
-        let exp = now() + 7 * 86400;
+        self.sign_session_exp(u, 7 * 86400)
+    }
+
+    /// Long-lived bearer token for the CLI (same wire format as a session).
+    /// One year: long enough not to annoy, short enough that a leaked token
+    /// is not eternal; rotate by re-running `pushit login`.
+    pub fn sign_api_token(&self, u: &User) -> String {
+        self.sign_session_exp(u, 365 * 86400)
+    }
+
+    fn sign_session_exp(&self, u: &User, ttl_secs: u64) -> String {
+        let exp = now() + ttl_secs;
         let payload = format!("{exp}|{}|{}|{}", u.id, u.name, u.email);
         let mut mac = HmacSha256::new_from_slice(&self.cfg.session_key).unwrap();
         mac.update(payload.as_bytes());
@@ -115,6 +126,14 @@ impl Auth {
             }
         }
         None
+    }
+
+    // ---- long-lived API bearer (same HMAC format) ----
+
+    pub fn verify_api_token(&self, headers: &HeaderMap) -> Option<User> {
+        let h = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+        let token = h.strip_prefix("Bearer ")?;
+        self.verify_session(token)
     }
 
     // ---- OIDC auth-code flow ----
@@ -272,7 +291,7 @@ fn getrandom_fill(buf: &mut [u8]) {
         .expect("urandom");
 }
 
-fn urlencoding(s: &str) -> String {
+pub(crate) fn urlencoding(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {

@@ -53,6 +53,8 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<SkillCmd>,
     },
+    /// Authenticate once via browser; the token is stored and reused (~1 year).
+    Login,
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
     Build(BuildArgs),
     /// Run the app on a local standalone runtime (no controller needed).
@@ -155,6 +157,7 @@ fn main() -> Result<()> {
             }
             Some(SkillCmd::Install(a)) => skill_install(&a),
         },
+        Cmd::Login => login(&server),
         Cmd::Plan { manifest } => plan_root(
             &server,
             &client,
@@ -195,7 +198,12 @@ fn url(server: &str, path: &str) -> String {
 
 fn client(cli: &Cli) -> Result<Client> {
     let mut headers = HeaderMap::new();
-    if let Some(t) = &cli.token {
+    // precedence: --token > PUSHIT_TOKEN > token saved by `pushit login`
+    let token = cli
+        .token
+        .clone()
+        .or_else(read_saved_token);
+    if let Some(t) = token {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {t}")).context("invalid token")?,
@@ -207,6 +215,22 @@ fn client(cli: &Cli) -> Result<Client> {
     Ok(Client::builder().default_headers(headers).build()?)
 }
 
+fn saved_token_path() -> Option<PathBuf> {
+    let cfg = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .ok()
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(cfg.join("pushit").join("token"))
+}
+
+fn read_saved_token() -> Option<String> {
+    std::fs::read_to_string(saved_token_path()?)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Print non-2xx body and exit 1, otherwise return the response.
 fn check(resp: Response) -> Result<Response> {
     if resp.status().is_success() {
@@ -215,6 +239,9 @@ fn check(resp: Response) -> Result<Response> {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         eprintln!("error: {status}\n{body}");
+        if status == 401 {
+            eprintln!("hint: run `pushit login` to get a long-lived token, or check --token/--dev");
+        }
         std::process::exit(1);
     }
 }
@@ -750,6 +777,79 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
 }
 
 const SKILL_MD: &str = include_str!("../../skills/pushit-app/SKILL.md");
+
+/// `pushit login`: open `{server}/auth/device` in a browser, catch the
+/// minted long-lived token on a localhost listener, store it for client().
+fn login(server: &str) -> Result<()> {
+    use std::io::{Read as _, Write as _};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    let url = format!("{server}/auth/device?port={port}");
+    println!("opening {url}\n(if the browser does not open, visit it manually)");
+    let _ = std::process::Command::new("xdg-open")
+        .arg(&url)
+        .spawn();
+
+    println!("waiting for authorization (2 min)... ");
+    listener.set_nonblocking(false)?;
+    let (mut stream, _) = listener.accept()?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    // read until headers end; the token arrives as a query param on GET /
+    loop {
+        if std::time::Instant::now() > deadline {
+            bail!("timed out waiting for browser callback");
+        }
+        match stream.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+            Err(e) => return Err(e.into()),
+        }
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 64 * 1024 {
+            bail!("oversized request");
+        }
+    }
+    let head = String::from_utf8_lossy(&buf);
+    let path = head.split_whitespace().nth(1).unwrap_or_default();
+    let query = path.split_once('?').map(|(_, q)| q).unwrap_or_default();
+    let mut token = None;
+    let mut user = None;
+    for pair in query.split('&') {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        match k {
+            "token" => token = Some(v.to_string()),
+            "user" => user = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    let (Some(token), Some(user)) = (token, user) else {
+        bail!("callback did not carry a token");
+    };
+    let _ = stream.write_all(
+        b"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nconnection: close\r\n\r\n\
+          <html><body><h3>Token received.</h3>You can close this tab and return to the terminal.</body></html>",
+    );
+
+    let path = saved_token_path()
+        .ok_or_else(|| anyhow!("cannot determine config dir (set HOME)"))?;
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, &token)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+    }
+    println!("logged in as {user}");
+    println!("token saved to {} (valid ~1 year, `pushit login` rotates it)", path.display());
+    Ok(())
+}
 
 fn skill_install(a: &SkillInstallArgs) -> Result<()> {
     let target = if a.project {
