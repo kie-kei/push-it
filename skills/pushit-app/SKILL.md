@@ -99,6 +99,12 @@ Rules that bite when violated:
 
 If a component imports an interface NOT granted in `capabilities`, the request fails — check the manifest first when a call errors with "not granted".
 
+## Deep-dive references (read as needed)
+
+- [references/sql.md](references/sql.md) — `wasi:sql` full contract: connection/statement resources, drivers (postgres/mysql/sqlite/ClickHouse), flattened rows, `local` database, binding sources
+- [references/blobstore.md](references/blobstore.md) — `wasi:blobstore` full contract: containers, object read/write, listing, cross-store copy/move
+- [references/logging.md](references/logging.md) — `wasi:logging` levels and where lines land
+
 ## Everyday commands
 
 ```bash

@@ -751,7 +751,7 @@ fn skill_install(a: &SkillInstallArgs) -> Result<()> {
     };
     print!(
         "install pushit skill to {}?{} [y/N] ",
-        target.display(),
+        target.parent().unwrap().display(),
         if target.exists() { " (will overwrite)" } else { "" }
     );
     std::io::Write::flush(&mut std::io::stderr())?;
@@ -765,6 +765,18 @@ fn skill_install(a: &SkillInstallArgs) -> Result<()> {
         fs::create_dir_all(dir)?;
     }
     fs::write(&target, SKILL_MD)?;
+    // references/ travels with the skill (relative links in SKILL.md)
+    let refs_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/pushit-app/references");
+    if refs_dir.is_dir() {
+        let dest = target.parent().unwrap().join("references");
+        fs::create_dir_all(&dest)?;
+        for entry in fs::read_dir(&refs_dir)?.filter_map(|e| e.ok()) {
+            let dest_file = dest.join(entry.file_name());
+            if entry.path().is_file() {
+                fs::copy(entry.path(), &dest_file)?;
+            }
+        }
+    }
     println!("installed: {}", target.display());
     Ok(())
 }
