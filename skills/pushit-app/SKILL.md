@@ -11,18 +11,18 @@ PushIt deploys apps as **WASM components + static UI** to a single-VM controller
 
 ```bash
 mkdir myapp && cd myapp
-pushit init                # scaffold: pushit.yaml, fn/, ui/, Makefile
-make deploy                # = pushit build + pushit --dev deploy
+pushit init                # scaffold: pushit.yaml, fn/, ui/
+pushit build               # runs build.fn/build.ui from the manifest + verifies artifacts
+pushit --dev deploy        # upload and activate
 ```
 
-`pushit init` writes a `Makefile` that wraps the CLI. **Always prefer `make deploy` / `make logs` over ad-hoc command sequences** — the Makefile is the supported routine-work path, and it fails loudly with the underlying build error.
+The routine loop is exactly two commands: `pushit build` (or just `pushit deploy` when artifacts are already built) and `pushit --dev deploy`. No extra tooling — the CLI reads `build:` commands out of `pushit.yaml`, so the manifest is both the IaC unit and the build definition.
 
 ## The app contract
 
 ```
 myapp/
-  pushit.yaml     # manifest — the IaC unit
-  Makefile        # wraps pushit build/deploy/logs
+  pushit.yaml     # manifest — IaC unit AND build definition
   fn/             # Rust → cargo component → app.wasm
   ui/             # static UI (any stack that produces files)
 ```
@@ -91,7 +91,7 @@ pushit --dev rollback myapp --revision <id>
 
 ## Making changes to an existing app
 
-Edit code → `make deploy` (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
+Edit code → `pushit build && pushit --dev deploy` (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
 
 ## Common failures and fixes
 
