@@ -37,7 +37,7 @@ secrets:                         # names only — values are set via `pushit sec
 capabilities:                    # what the component is allowed to import/use
   http_out: ["api.example.com"]  # presence grants outgoing HTTP (MVP: unrestricted)
   env: [API_TOKEN]
-  sql: [analytics]               # logical DB names from controller's databases.yaml
+  sql: [local]                   # 'local' = built-in per-app sqlite; other names via databases.yaml
   blobstore: [files]             # logical stores from blobstores.yaml
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip2
