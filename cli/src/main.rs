@@ -230,7 +230,7 @@ fn build(args: &BuildArgs) -> Result<()> {
         .with_context(|| format!("read {}", args.manifest.display()))?;
     let manifest: serde_yaml::Value =
         serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
-    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let base = manifest_base(&args.manifest);
     run_build_steps(&manifest, &base)
 }
 
@@ -297,7 +297,7 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
         .get("apps")
         .and_then(|v| v.as_mapping())
         .ok_or_else(|| anyhow!("root manifest: `apps:` must be a mapping of name → {{repo, ...}}"))?;
-    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let base = manifest_base(&args.manifest);
     let cache = base.join(".pushit-cache");
     fs::create_dir_all(&cache)?;
 
@@ -368,7 +368,7 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
         let manifest_text = serde_yaml::to_string(&m).context("re-serialize manifest")?;
         println!("==> {key}: build + deploy");
         // build locally (never on the server) from the app's own manifest
-        let app_base = app_args.manifest.parent().unwrap_or_else(|| Path::new("."));
+        let app_base = manifest_base(&app_args.manifest);
         if let Err(e) = run_build_steps(&m, app_base) {
             eprintln!("FAIL {key}: {e:#}");
             failed.push(key.to_string());
@@ -433,7 +433,7 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
         .get("apps")
         .and_then(|v| v.as_mapping())
         .ok_or_else(|| anyhow!("plan: manifest must be a root manifest with an `apps:` section"))?;
-    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let base = manifest_base(&args.manifest);
     let cache = base.join(".pushit-cache");
     fs::create_dir_all(&cache)?;
 
@@ -611,7 +611,7 @@ fn deploy_one(
         .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("pushit.yaml: missing `name`"))?;
-    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let base = manifest_base(&args.manifest);
 
     let wasm = match args.wasm.or_else(|| manifest_path(&manifest, "entry", base)) {
         Some(p) => p,
@@ -640,6 +640,16 @@ fn deploy_one(
         .send()?;
     println!("{}", check(resp)?.text()?);
     Ok(())
+}
+
+/// Base dir for paths in a manifest. `.parent()` of a bare relative
+/// filename ("pushit.yaml") is Some("") — chdir("") is ENOENT, so map it
+/// to the current directory.
+fn manifest_base(manifest: &Path) -> &Path {
+    manifest
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
 }
 
 fn manifest_path(manifest: &serde_yaml::Value, key: &str, base: &Path) -> Option<PathBuf> {
