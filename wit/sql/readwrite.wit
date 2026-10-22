@@ -1,0 +1,5 @@
+interface readwrite {
+    use types.{statement, row, error, connection};
+    query: func(c: borrow<connection>, q: borrow<statement>) -> result<list<row>, error>;
+    exec: func(c: borrow<connection>, q: borrow<statement>) -> result<u32, error>;
+}

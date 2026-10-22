@@ -15,12 +15,14 @@ use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::types::HostFutureIncomingResponse;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+use crate::sql_host::{self, SqlCtx};
 
 pub struct ComponentCtx {
     table: ResourceTable,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     allow_http_out: bool,
+    pub sql: SqlCtx,
 }
 
 impl IoView for ComponentCtx {
@@ -54,6 +56,8 @@ impl WasiHttpView for ComponentCtx {
 /// Wasmtime host: one engine, cached `ProxyPre` per artifact dir.
 pub struct Runtime {
     engine: Engine,
+    /// (revision-dir, connection-name) → backend pool, shared across calls.
+    sql_pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<sql_host::Backend>>>>,
     pre: Mutex<HashMap<PathBuf, Arc<ProxyPre<ComponentCtx>>>>,
     pub timeout: Duration,
 }
@@ -75,8 +79,10 @@ impl Runtime {
             std::thread::sleep(Duration::from_millis(10));
             eng.increment_epoch();
         });
+        sqlx::any::install_default_drivers();
         Ok(Runtime {
             engine,
+            sql_pools: Arc::new(Mutex::new(HashMap::new())),
             pre: Mutex::new(HashMap::new()),
             timeout,
         })
@@ -95,6 +101,7 @@ impl Runtime {
         let mut linker: Linker<ComponentCtx> = Linker::new(&self.engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+        sql_host::add_to_linker(&mut linker)?;
         let pre = linker
             .instantiate_pre(&component)
             .context("linking component (missing/unresolved imports)")?;
@@ -112,6 +119,8 @@ impl Runtime {
         dir: &Path,
         env: Vec<(String, String)>,
         allow_http_out: bool,
+        sql_allowed: Vec<String>,
+        sql_dsns: HashMap<String, String>,
         req: hyper::Request<Full<Bytes>>,
     ) -> Result<CallResult> {
         let pre = self.load(dir)?;
@@ -129,6 +138,12 @@ impl Runtime {
                 wasi: wb.build(),
                 http: WasiHttpCtx::new(),
                 allow_http_out,
+                sql: SqlCtx {
+                    dir: dir.to_path_buf(),
+                    allowed: sql_allowed,
+                    dsns: sql_dsns,
+                    pools: self.sql_pools.clone(),
+                },
             },
         );
         // epoch deadline: 10ms ticks

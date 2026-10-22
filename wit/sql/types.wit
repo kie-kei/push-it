@@ -1,0 +1,23 @@
+package wasi:sql@0.2.0-draft;
+
+interface types {
+    record row {
+        field-name: string,
+        value: data-type,
+    }
+    variant data-type {
+        int32(s32), int64(s64), uint32(u32), uint64(u64),
+        float(f64), double(f64), str(string), boolean(bool),
+        date(string), time(string), timestamp(string),
+        binary(list<u8>), null
+    }
+    resource statement {
+        prepare: static func(query: string, params: list<string>) -> result<statement, error>;
+    }
+    resource error {
+        trace: func() -> string;
+    }
+    resource connection {
+        open: static func(name: string) -> result<connection, error>;
+    }
+}

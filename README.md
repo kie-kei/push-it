@@ -29,3 +29,10 @@ pushit logs myapp
 - `examples/hello/` — эталонное приложение
 - `infra/` — docker-compose (Caddy + Keycloak), realm
 - `scripts/e2e.sh` — end-to-end проверка
+
+## SQL
+
+Компоненты могут импортировать `wasi:sql@0.2.0-draft` — SQL через хост-функции.
+Доступ: `capabilities.sql` в pushit.yaml + `$PUSHIT_DATA/databases.yaml`
+(логическое имя → DSN). Драйверы: postgres/mysql/sqlite через sqlx,
+ClickHouse через HTTP-эндпоинт. См. `docs/sql.md`.

@@ -15,6 +15,7 @@ package = "pushit:hello-fn"
 [package.metadata.component.target.dependencies]
 "wasi:http" = "=0.2.0"
 "wasi:cli" = "=0.2.0"
+"wasi:sql" = { path = "wit/deps/sql" }
 
 
 # Standalone crate: detached from the repository's root workspace.

@@ -603,13 +603,18 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Ok(r) => r,
         Err(e) => return err500(e.into()),
     };
-
+    let sql_dsns = match crate::sql_host::load_databases(&s.cfg.data_dir) {
+        Ok(m) => m,
+        Err(e) => return err500(e),
+    };
     match s
         .runtime
         .call(
             std::path::Path::new(&rev.artifact_dir),
             env,
             manifest.http_out(),
+            manifest.capabilities.sql.clone(),
+            sql_dsns,
             hreq,
         )
         .await

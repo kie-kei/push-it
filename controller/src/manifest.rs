@@ -28,6 +28,10 @@ pub struct Capabilities {
     pub http_out: Option<Vec<String>>,
     #[serde(default)]
     pub env: Vec<String>,
+    /// Logical connection names this component may open via wasi:sql.
+    /// Names must exist in `$PUSHIT_DATA/databases.yaml`.
+    #[serde(default)]
+    pub sql: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -44,6 +48,11 @@ impl Manifest {
             for label in d.split('.') {
                 m.validate_name(label)
                     .with_context(|| format!("bad domain label '{label}'"))?;
+            }
+        }
+        for n in &m.capabilities.sql {
+            if n.trim().is_empty() {
+                bail!("capabilities.sql: connection names must be non-empty");
             }
         }
         Ok(m)
@@ -115,6 +124,17 @@ build:
         assert_eq!(m.env["CLICKHOUSE_URL"], "http://ch:8123");
         assert_eq!(m.secrets, vec!["TOKEN", "S3_KEY"]);
         assert!(m.http_out());
+
         assert_eq!(m.build.ui_dist.as_deref(), Some("ui/dist"));
+    }
+
+    #[test]
+    fn parses_sql_capability() {
+        let m = Manifest::parse("name: a\ncapabilities:\n  sql: [sl, pg1]\n").unwrap();
+        assert_eq!(m.capabilities.sql, vec!["sl", "pg1"]);
+        let m = Manifest::parse("name: a\n").unwrap();
+        assert!(m.capabilities.sql.is_empty());
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"\"]\n").is_err());
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\" \"]\n").is_err());
     }
 }
