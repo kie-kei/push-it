@@ -116,6 +116,18 @@ pushit --dev rollback myapp --revision <id>
 
 `--dev` sends `X-Pushit-Dev: 1` — use against a dev controller (`PUSHIT_DEV=1`). For production: `--token <jwt>` or `PUSHIT_TOKEN` env, and `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`).
 
+## Testing and iterating
+
+**Test server functions locally first** — `pushit dev` runs the app on the same wasmtime host as the platform, no controller needed:
+
+```bash
+pushit dev                                          # build + serve http://127.0.0.1:9101
+pushit dev --env KEY=value --dsn db='postgres://…' --http-out
+curl http://127.0.0.1:9101/_fn/hello                # exercise the function
+```
+
+This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:sql/blobstore/logging), same `local` sqlite, same 30s timeout — what passes locally passes on the platform, minus auth/hub. Go to the controller (`pushit build && pushit --dev deploy`) only when you need to verify auth, the hub, revisions/rollback, or real bound secrets.
+
 ## Debugging a deployed app
 
 1. **Deploy-time failure** (400 from `pushit deploy`): read the error — it names the cause: bad manifest, missing secret, component missing `incoming-handler` export, wasm not a component.
@@ -126,7 +138,7 @@ pushit --dev rollback myapp --revision <id>
 
 ## Making changes to an existing app
 
-Edit code → `pushit build && pushit --dev deploy` (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
+Edit code → verify with `pushit dev` (fast, local), then `pushit build && pushit --dev deploy` when the change should land (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
 
 ## Common failures and fixes
 
