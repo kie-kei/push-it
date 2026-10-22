@@ -41,48 +41,40 @@ exec:  func(c: borrow<connection>, q: borrow<statement>)
 
 ## Granting access
 
-pushit.yaml:
+pushit.yaml — the app declares logical connection names, nothing about
+where the credentials live:
 
 ```yaml
 capabilities:
-  sql: [local, $SECRET/arcadia-db]   # 'local' = built-in per-app sqlite
+  sql: [local, db]   # 'local' = built-in per-app sqlite
 ```
 
-Each grant is either:
+`local` — reserved name: app-scoped sqlite at
+`$PUSHIT_DATA/appdata/<app>/local.db`, no configuration needed.
 
-- `local` — reserved name: app-scoped sqlite at
-  `$PUSHIT_DATA/appdata/<app>/local.db`, no configuration needed; or
-- `$SECRET/<name>` — the DSN is stored in the app secret `<name>`:
+Every other name must be **bound at deploy time** by the deployer (root
+manifest) to a secret source — the app repo never decides the scope:
+
+```yaml
+# root pushit.yaml (deploy side)
+apps:
+  myapp:
+    repo: git@…
+    env: {}
+    sql:
+      db: platform:arcadia-prod    # platform-wide secret, shared by apps
+      # db: secret:arcadia-dsn     # …or an app-private secret
+```
 
 ```bash
-pushit secret set myapp arcadia-db 'postgres://user:pass@arcadiamusicalliance.com:5432/arcadia'
+pushit secret global set arcadia-prod='postgres://user:pass@arcadiamusicalliance.com:5432/arcadia'
+# or app-scoped: pushit secret set myapp arcadia-dsn='postgres://…'
 ```
 
-The guest opens `connection.open("arcadia-db")`; the controller reads the
-secret and connects itself — the DSN never reaches the component; or
-- `$PLATFORM/<logical>` — the DSN lives in a *platform-wide* secret shared
-  by many apps. The app repo uses its own stable logical name; the deployer
-  binds it to the platform's global secret name at deploy time (root
-  manifest), so the repo never hardcodes platform naming:
-
-  ```yaml
-  # root pushit.yaml (deploy side)
-  apps:
-    myapp:
-      repo: git@…
-      env: {}
-      platform_secrets:
-        db: arcadia-prod   # global secret name on this platform
-  ```
-
-  ```bash
-  pushit secret global set arcadia-prod='postgres://user:pass@db.internal:5432/arcadia'
-  ```
-
-  Several apps can bind their logical `db` to the same global secret.
-  `$PLATFORM/<x>` without a binding fails manifest validation at deploy.
-
-Anything else in `capabilities.sql` fails manifest validation.
+The guest opens `connection.open("db")`; the controller reads the bound
+secret and connects itself — the DSN never reaches the component.
+Unbound names fail manifest validation at deploy; bindings pointing at
+missing secrets fail deploy with a `pushit secret …` hint.
 
 `connection.open(name)` succeeds only if `name` is in `capabilities.sql`
 and a DSN is resolvable for it; otherwise it returns an error resource.

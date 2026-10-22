@@ -204,6 +204,33 @@ pub fn deploy_inner(
         bail!("missing secrets: {}", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
     }
 
+    // sql bindings: sources must exist now, not just at request time
+    for (conn, b) in &manifest.sql_bindings {
+        if manifest.capabilities.sql.iter().all(|g| g != conn) {
+            continue; // binding for a non-granted name is harmless dead config
+        }
+        let (src, key) = b
+            .split_once(':')
+            .filter(|(s, k)| {
+                matches!(*s, "secret" | "platform") && !k.is_empty()
+            })
+            .with_context(|| format!("sql binding '{conn}': '{b}' must be secret:<app-secret-key> or platform:<global-secret-name>"))?;
+        let ok = match src {
+            "secret" => s.db.get_secret_enc(name, key)?.is_some(),
+            _ => s.db.get_global_secret(key)?.is_some(),
+        };
+        if !ok {
+            bail!(
+                "sql binding '{conn}' → {src} secret '{key}' not set ({})",
+                if src == "secret" {
+                    format!("pushit secret set {name} {key}=<dsn>")
+                } else {
+                    format!("pushit secret global set {key}=<dsn>")
+                }
+            );
+        }
+    }
+
     let rev = new_revision_id();
     let dir = s.cfg.apps_dir().join(name).join(&rev);
     std::fs::create_dir_all(&dir)?;
@@ -642,18 +669,16 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Err(e) => return err500(e.into()),
     };
     let (sql_allowed, sql_dsns) = {
-        let bindings = &manifest.platform_secrets;
-        match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |key| {
-            s.db
-                .get_secret_enc(&app.name, key)
-                .ok()
-                .flatten()
-                .and_then(|enc| s.secrets.decrypt(&enc).ok())
-                .map(|v| String::from_utf8_lossy(&v).into_owned())
-        }, |logical| {
-            bindings
-                .get(logical)
-                .and_then(|g| s.db.get_global_secret(g).ok().flatten())
+        let bindings = &manifest.sql_bindings;
+        match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |name| {
+            let b = bindings.get(name)?;
+            let (src, key) = b.split_once(':')?;
+            let enc = match src {
+                "secret" => s.db.get_secret_enc(&app.name, key),
+                "platform" => s.db.get_global_secret(key),
+                _ => return None,
+            };
+            enc.ok().flatten()
                 .and_then(|enc| s.secrets.decrypt(&enc).ok())
                 .map(|v| String::from_utf8_lossy(&v).into_owned())
         }) {

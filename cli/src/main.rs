@@ -88,7 +88,7 @@ enum SecretCmd {
     Ls { app: String },
     /// Remove a secret.
     Rm { app: String, key: String },
-    /// Platform-wide secrets shared by apps (referenced as $PLATFORM/<logical>).
+    /// Platform-wide secrets shared by apps (bind via root manifest `sql: platform:<name>`).
     Global {
         #[command(subcommand)]
         cmd: GlobalCmd,
@@ -330,13 +330,13 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
         };
         let mut m = m;
         m["env"] = env;
-        // $PLATFORM/<logical> sql grants: bind app-local logical names to
-        // platform-wide global secret names (deployer knowledge, not repo).
-        if let Some(bindings) = cfg.get("platform_secrets") {
+        // capabilities.sql grants: bind app-local logical names to sources
+        // (secret:<key> | platform:<global>) — deployer knowledge, not repo.
+        if let Some(bindings) = cfg.get("sql") {
             if bindings.as_mapping().is_some() {
-                m["platform_secrets"] = bindings.clone();
+                m["sql_bindings"] = bindings.clone();
             } else {
-                eprintln!("FAIL {key}: platform_secrets must be a mapping of logical → global name");
+                eprintln!("FAIL {key}: sql must be a mapping of connection → secret:<key> | platform:<global>");
                 failed.push(key.to_string());
                 continue;
             }
@@ -535,17 +535,17 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             }
         }
 
-        // platform_secrets bindings (root manifest is authoritative)
-        if let Some(bindings) = cfg.get("platform_secrets").filter(|v| v.as_mapping().is_some()) {
+        // sql bindings (root manifest is authoritative)
+        if let Some(bindings) = cfg.get("sql").filter(|v| v.as_mapping().is_some()) {
             let live_bindings = live_manifest
-                .get("platform_secrets")
+                .get("sql_bindings")
                 .and_then(|v| v.as_mapping())
                 .cloned()
                 .unwrap_or_default();
             for (k, v) in bindings.as_mapping().unwrap() {
                 if live_bindings.get(k) != Some(v) {
                     changes.push(format!(
-                        "platform_secrets.{} = {:?}",
+                        "sql.{} = {:?}",
                         k.as_str().unwrap_or("?"),
                         v.as_str().unwrap_or("?")
                     ));
