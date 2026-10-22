@@ -1,0 +1,3 @@
+world logging-host {
+    import logging;
+}

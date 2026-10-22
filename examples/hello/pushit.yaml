@@ -5,6 +5,7 @@ secrets:
   - HELLO_SECRET
 capabilities:
   sql: [sl]
+  blobstore: [files]
 build:
   fn: cargo component build --release --target wasm32-wasip2
   ui_dist: ui

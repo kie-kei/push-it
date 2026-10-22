@@ -42,3 +42,8 @@ functions. Grant logical connection names via `capabilities.sql` in
 pushit.yaml; the platform admin maps names to DSNs in
 `$PUSHIT_DATA/databases.yaml`. Drivers: postgres/mysql/sqlite (sqlx),
 ClickHouse (HTTP endpoint). See `docs/sql.md`.
+
+Components may import `wasi:blobstore@0.2.0-draft` for object storage through
+host functions (opendal backend; `capabilities.blobstore` + `$PUSHIT_DATA/blobstores.yaml`;
+see `docs/blobstore.md`) and `wasi:logging/logging@0.1.0-draft` for structured
+log lines into the per-app log (`docs/logging.md`).

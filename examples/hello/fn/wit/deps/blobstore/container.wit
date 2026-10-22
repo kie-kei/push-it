@@ -1,0 +1,55 @@
+interface container {
+    use types.{container-metadata, error, incoming-value, object-metadata, object-name, outgoing-value};
+
+    /// A container (aka bucket) in a blobstore.
+    resource container {
+        /// Returns container name.
+        name: func() -> result<string, error>;
+
+        /// Returns container metadata.
+        info: func() -> result<container-metadata, error>;
+
+        /// Retrieves an object or part of an object from the container.
+        ///
+        /// Returns an `incoming-value` that the caller can use to get the
+        /// object's data. The `start` and `end` parameters are inclusive
+        /// offsets, e.g. `get-data(0, 99)` returns the first 100 bytes; use
+        /// `end = u64::MAX` for "to the end".
+        get-data: func(name: object-name, start: u64, end: u64) -> result<incoming-value, error>;
+
+        /// Creates or replaces an object with the given name.
+        ///
+        /// `data` is an `outgoing-value` whose body the guest has already
+        /// written; call `outgoing-value.finish` after this call.
+        write-data: func(name: object-name, data: borrow<outgoing-value>) -> result<_, error>;
+
+        /// Returns a list of objects in the container.
+        list-objects: func() -> result<stream-object-names, error>;
+
+        /// Deletes an object, or does nothing if it does not exist.
+        delete-object: func(name: object-name) -> result<_, error>;
+
+        /// Deletes a list of objects; objects that do not exist are ignored.
+        delete-objects: func(names: list<object-name>) -> result<_, error>;
+
+        /// Returns whether an object exists in the container.
+        has-object: func(name: object-name) -> result<bool, error>;
+
+        /// Returns metadata about an object.
+        object-info: func(name: object-name) -> result<object-metadata, error>;
+
+        /// Deletes all objects in the container.
+        clear: func() -> result<_, error>;
+    }
+
+    /// A cursor over object names in a container.
+    resource stream-object-names {
+        /// Returns the next batch of object names (up to `len`), plus a flag
+        /// indicating whether the stream is finished.
+        read-stream-object-names: func(len: u64) -> result<tuple<list<object-name>, bool>, error>;
+
+        /// Skips the next `num` object names; returns the number skipped plus a
+        /// flag indicating whether the stream is finished.
+        skip-stream-object-names: func(num: u64) -> result<tuple<u64, bool>, error>;
+    }
+}

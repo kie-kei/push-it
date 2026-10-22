@@ -5,6 +5,9 @@ use bindings::exports::wasi::http::incoming_handler::Guest;
 use bindings::wasi::http::types::{
     Fields, IncomingRequest, OutgoingBody, OutgoingResponse, ResponseOutparam,
 };
+use bindings::wasi::blobstore::blobstore;
+use bindings::wasi::blobstore::types::{IncomingValue, OutgoingValue};
+use bindings::wasi::logging::logging::{self, Level};
 use bindings::wasi::sql::readwrite;
 use bindings::wasi::sql::types::{Connection, DataType, Error, Statement};
 
@@ -31,6 +34,14 @@ impl Guest for Component {
                 (200, format!("{{\"GREETING\":\"{v}\"}}"))
             }
             "/_fn/sql" => match sql_roundtrip() {
+                Ok(s) => (200, s),
+                Err(e) => (500, format!("{{\"error\":{e:?}}}")),
+            },
+            "/_fn/log" => {
+                logging::log(Level::Info, "hello", "hello from wasi:logging");
+                (200, "{\"ok\":true}".into())
+            }
+            "/_fn/blob" => match blob_roundtrip() {
                 Ok(s) => (200, s),
                 Err(e) => (500, format!("{{\"error\":{e:?}}}")),
             },
@@ -86,6 +97,46 @@ fn sql_roundtrip() -> Result<String, String> {
     Ok(format!("{{\"rows\":[{}]}}", fields.join(",")))
 }
 
+fn blob_roundtrip() -> Result<String, String> {
+    let c = blobstore::get_container("files")?;
+
+    // write object via outgoing-value
+    let out = OutgoingValue::new_outgoing_value();
+    let stream = out
+        .outgoing_value_write_body()
+        .map_err(|_| "write-body".to_string())?;
+    stream
+        .blocking_write_and_flush(b"blob-roundtrip")
+        .map_err(|e| format!("stream write: {e:?}"))?;
+    drop(stream);
+    c.write_data("hello.txt", &out)?;
+    OutgoingValue::finish(out)?;
+
+    // read it back
+    let inv = c.get_data("hello.txt", 0, u64::MAX)?;
+    let size = inv.size();
+    let body = IncomingValue::incoming_value_consume_sync(inv)?;
+    let body = String::from_utf8_lossy(&body).into_owned();
+
+    // list objects
+    let stream = c.list_objects()?;
+    let (mut names, mut done) = stream.read_stream_object_names(64)?;
+    while !done {
+        let (more, d) = stream.read_stream_object_names(64)?;
+        names.extend(more);
+        done = d;
+    }
+
+    let names_json = names
+        .iter()
+        .map(|n| format!("{n:?}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!(
+        "{{\"body\":{body:?},\"size\":{size},\"names\":[{names_json}],\"exists\":{}}}",
+        c.has_object("hello.txt")?
+    ))
+}
 fn trace(e: Error) -> String {
     e.trace()
 }

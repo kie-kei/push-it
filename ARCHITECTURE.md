@@ -134,10 +134,10 @@ pushit deploy (на машине разработчика или в CI):
 |---|---|---|---|
 | `wasi:http` (in/out) | Phase 3, стабилен | wasmtime из коробки + allowlist хостов в outgoing-handler | **MVP** |
 | env/secrets через хост | — | env подаётся при instantiate, секреты из SQLite | **MVP** |
-| `wasi:blobstore` | Phase 1 (draft, `0.2.0-draft`) | свой host поверх S3-клиента: get/put/list/stream → бакет из манифеста. Креды живут у хоста, компоненту не нужны | Следующий шаг (S3-кейс) |
+| `wasi:blobstore` | Phase 1 (draft, `0.2.0-draft`) | **Реализовано**: opendal (`services-s3`, `services-fs`), `capabilities.blobstore: [name]` → `blobstores.yaml`, whole-object буферы в MVP | **Done** |
 | `wasi:kv-store` | Phase 2 | host → Redis/Redis-кластер при появлении потребности | По потребности |
 | `wasi:sql` | Phase 1 | **Реализовано**: `sqlx::AnyPool` (postgres/mysql/sqlite) + ClickHouse через HTTP-эндпоинт; `capabilities.sql: [name]` → `databases.yaml` (name→DSN), креды у хоста | **Done** |
-| `wasi:logging` | Phase 1 | host → per-app лог-файл | Дёшево, можно сразу |
+| `wasi:logging` | Phase 1 | **Реализовано**: `log(level, ctx, msg)` → строка в per-app лог-файл (`LogStore`), структурные уровни | **Done** |
 | `wasi:messaging` | Phase 2 | — | Не планируется до запроса |
 
 Принцип: берём WIT-спеки draft-пропозалов как есть (не выдумываем свой API) — если спека стандартизируется, компоненты совместимы бесплатно. Побочный эффект: приложение с `blobstore`/`sql` не нуждается в `http_out` к S3/БД и кредах в env — поверхность секретов сужается.

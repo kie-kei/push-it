@@ -1,0 +1,5 @@
+world blobstore-host {
+    import types;
+    import container;
+    import blobstore;
+}

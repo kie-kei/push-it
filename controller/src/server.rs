@@ -27,7 +27,7 @@ pub struct AppState {
     pub db: Db,
     pub secrets: Secrets,
     pub runtime: Runtime,
-    pub logs: LogStore,
+    pub logs: Arc<LogStore>,
     pub auth: Auth,
 }
 
@@ -607,16 +607,24 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Ok(m) => m,
         Err(e) => return err500(e),
     };
+    let blob_stores = match crate::blob_host::load_blobstores(&s.cfg.data_dir) {
+        Ok(m) => m,
+        Err(e) => return err500(e),
+    };
+    let caps = crate::runtime::HostCaps {
+        allow_http_out: manifest.http_out(),
+        sql_allowed: manifest.capabilities.sql.clone(),
+        sql_dsns,
+        blob_allowed: manifest.capabilities.blobstore.clone(),
+        blob_stores,
+        log: crate::log_host::LogCtx {
+            app: app.name.clone(),
+            logs: s.logs.clone(),
+        },
+    };
     match s
         .runtime
-        .call(
-            std::path::Path::new(&rev.artifact_dir),
-            env,
-            manifest.http_out(),
-            manifest.capabilities.sql.clone(),
-            sql_dsns,
-            hreq,
-        )
+        .call(std::path::Path::new(&rev.artifact_dir), env, caps, hreq)
         .await
     {
         Ok(res) => {

@@ -1,0 +1,22 @@
+interface blobstore {
+    use container.{container};
+    use types.{error, container-name, object-id};
+
+    /// Creates a new, empty container.
+    create-container: func(name: container-name) -> result<container, error>;
+
+    /// Gets a reference to an existing container.
+    get-container: func(name: container-name) -> result<container, error>;
+
+    /// Deletes a container and all objects in it.
+    delete-container: func(name: container-name) -> result<_, error>;
+
+    /// Returns whether the container exists.
+    container-exists: func(name: container-name) -> result<bool, error>;
+
+    /// Copies an object, optionally to a different container.
+    copy-object: func(src: object-id, dest: object-id) -> result<_, error>;
+
+    /// Moves an object, optionally to a different container.
+    move-object: func(src: object-id, dest: object-id) -> result<_, error>;
+}

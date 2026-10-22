@@ -53,6 +53,7 @@ fi
 echo "==> write databases.yaml"
 mkdir -p "$PUSHIT_DATA"
 printf 'sl: sqlite://%s/hello.db\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/databases.yaml"
+printf 'files: fs://%s/blobs\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/blobstores.yaml"
 # sqlx sqlite won't create the file by default; an empty file is a valid db
 touch "$PUSHIT_DATA/hello.db"
 
@@ -109,6 +110,28 @@ if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/sql" | grep -q 'hello from sql'; t
   pass "fn sql returned inserted row"
 else
   fail "fn sql returned inserted row"
+fi
+
+echo "==> GET /_fn/log (wasi:logging)"
+if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/log" | grep -q '"ok":true'; then
+  pass "fn log returned ok"
+else
+  fail "fn log returned ok"
+fi
+
+echo "==> wasi:logging line in app logs"
+sleep 1
+if curl -sf -H 'X-Pushit-Dev: 1' "$SERVER/api/apps/$APP/logs?tail=50" | grep -q 'hello from wasi:logging'; then
+  pass "logging line in logs"
+else
+  fail "logging line in logs"
+fi
+
+echo "==> GET /_fn/blob (wasi:blobstore roundtrip)"
+if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/blob" | grep -q 'blob-roundtrip'; then
+  pass "fn blob roundtrip"
+else
+  fail "fn blob roundtrip"
 fi
 
 echo "==> logs endpoint"

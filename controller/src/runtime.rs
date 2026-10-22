@@ -15,7 +15,20 @@ use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::types::HostFutureIncomingResponse;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+use crate::blob_host::{self, BlobCtx};
+use crate::log_host::{self, LogCtx};
 use crate::sql_host::{self, SqlCtx};
+
+/// Host capabilities for one component invocation, resolved by the caller
+/// (manifest grants + resource maps + the app log sink).
+pub struct HostCaps {
+    pub allow_http_out: bool,
+    pub sql_allowed: Vec<String>,
+    pub sql_dsns: HashMap<String, String>,
+    pub blob_allowed: Vec<String>,
+    pub blob_stores: HashMap<String, blob_host::BlobEntry>,
+    pub log: LogCtx,
+}
 
 pub struct ComponentCtx {
     table: ResourceTable,
@@ -23,6 +36,8 @@ pub struct ComponentCtx {
     http: WasiHttpCtx,
     allow_http_out: bool,
     pub sql: SqlCtx,
+    pub blob: BlobCtx,
+    pub log: LogCtx,
 }
 
 impl IoView for ComponentCtx {
@@ -102,6 +117,8 @@ impl Runtime {
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         sql_host::add_to_linker(&mut linker)?;
+        blob_host::add_to_linker(&mut linker)?;
+        log_host::add_to_linker(&mut linker)?;
         let pre = linker
             .instantiate_pre(&component)
             .context("linking component (missing/unresolved imports)")?;
@@ -118,9 +135,7 @@ impl Runtime {
         &self,
         dir: &Path,
         env: Vec<(String, String)>,
-        allow_http_out: bool,
-        sql_allowed: Vec<String>,
-        sql_dsns: HashMap<String, String>,
+        caps: HostCaps,
         req: hyper::Request<Full<Bytes>>,
     ) -> Result<CallResult> {
         let pre = self.load(dir)?;
@@ -130,20 +145,25 @@ impl Runtime {
         wb.envs(&env)
             .stdout(stdout.clone())
             .stderr(stderr.clone())
-            .allow_ip_name_lookup(allow_http_out);
+            .allow_ip_name_lookup(caps.allow_http_out);
         let mut store = Store::new(
             &self.engine,
             ComponentCtx {
                 table: ResourceTable::new(),
                 wasi: wb.build(),
                 http: WasiHttpCtx::new(),
-                allow_http_out,
+                allow_http_out: caps.allow_http_out,
                 sql: SqlCtx {
                     dir: dir.to_path_buf(),
-                    allowed: sql_allowed,
-                    dsns: sql_dsns,
+                    allowed: caps.sql_allowed,
+                    dsns: caps.sql_dsns,
                     pools: self.sql_pools.clone(),
                 },
+                blob: BlobCtx {
+                    allowed: caps.blob_allowed,
+                    stores: caps.blob_stores,
+                },
+                log: caps.log,
             },
         );
         // epoch deadline: 10ms ticks

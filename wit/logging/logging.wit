@@ -1,0 +1,35 @@
+package wasi:logging@0.1.0-draft;
+
+interface logging {
+    /// Levels are ordered such that a level is "more verbose" if it is
+    /// numerically smaller.
+    enum level {
+        /// Describes messages about the values of variables and the flow of
+        /// control within a program.
+        trace,
+
+        /// Describes messages likely to be of interest to someone debugging a
+        /// program.
+        debug,
+
+        /// Describes messages likely to be of interest to someone monitoring a
+        /// program.
+        info,
+
+        /// Describes messages about hazardous situations.
+        warn,
+
+        /// Describes messages about serious errors.
+        error,
+
+        /// Describes messages about fatal errors.
+        critical,
+    }
+
+    /// Emit a log message.
+    ///
+    /// A log message has a `level` describing what kind of message is being
+    /// sent, a context string that's a field of the message, and a message
+    /// string containing the text to log.
+    log: func(level: level, context: string, message: string);
+}

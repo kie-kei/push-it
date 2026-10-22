@@ -32,6 +32,10 @@ pub struct Capabilities {
     /// Names must exist in `$PUSHIT_DATA/databases.yaml`.
     #[serde(default)]
     pub sql: Vec<String>,
+    /// Logical blobstore names this component may open via wasi:blobstore.
+    /// Names must exist in `$PUSHIT_DATA/blobstores.yaml`.
+    #[serde(default)]
+    pub blobstore: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]

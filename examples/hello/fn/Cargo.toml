@@ -13,9 +13,13 @@ crate-type = ["cdylib"]
 package = "pushit:hello-fn"
 
 [package.metadata.component.target.dependencies]
-"wasi:http" = "=0.2.0"
-"wasi:cli" = "=0.2.0"
+"wasi:http" = { path = "wit/deps/http" }
+"wasi:cli" = { path = "wit/deps/cli" }
+"wasi:io" = { path = "wit/deps/io" }
+"wasi:clocks" = { path = "wit/deps/clocks" }
 "wasi:sql" = { path = "wit/deps/sql" }
+"wasi:logging" = { path = "wit/deps/logging" }
+"wasi:blobstore" = { path = "wit/deps/blobstore" }
 
 
 # Standalone crate: detached from the repository's root workspace.

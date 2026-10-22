@@ -4,6 +4,2036 @@
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
 pub mod wasi {
+    pub mod blobstore {
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod types {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            pub type InputStream = super::super::super::wasi::io::streams::InputStream;
+            pub type OutputStream = super::super::super::wasi::io::streams::OutputStream;
+            /// A name for a container (aka bucket).
+            pub type ContainerName = _rt::String;
+            /// A name for an object within a container.
+            pub type ObjectName = _rt::String;
+            /// A timestamp represented as seconds since the Unix epoch.
+            pub type Timestamp = u64;
+            /// The size of an object in bytes.
+            pub type ObjectSize = u64;
+            /// Error type — draft carries a plain string instead of a resource.
+            pub type Error = _rt::String;
+            /// Information about a container.
+            #[derive(Clone)]
+            pub struct ContainerMetadata {
+                /// The name of the container.
+                pub name: ContainerName,
+                /// The timestamp when the container was created.
+                pub created_at: Timestamp,
+            }
+            impl ::core::fmt::Debug for ContainerMetadata {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("ContainerMetadata")
+                        .field("name", &self.name)
+                        .field("created-at", &self.created_at)
+                        .finish()
+                }
+            }
+            /// Information about an object.
+            #[derive(Clone)]
+            pub struct ObjectMetadata {
+                /// The name of the object.
+                pub name: ObjectName,
+                /// The name of the object's container.
+                pub container: ContainerName,
+                /// The timestamp when the object was created.
+                pub created_at: Timestamp,
+                /// The size of the object, in bytes.
+                pub size: ObjectSize,
+            }
+            impl ::core::fmt::Debug for ObjectMetadata {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("ObjectMetadata")
+                        .field("name", &self.name)
+                        .field("container", &self.container)
+                        .field("created-at", &self.created_at)
+                        .field("size", &self.size)
+                        .finish()
+                }
+            }
+            /// An identifier for an object that specifies both the container and the
+            /// object name.
+            #[derive(Clone)]
+            pub struct ObjectId {
+                /// The name of the object's container.
+                pub container: ContainerName,
+                /// The name of the object.
+                pub object: ObjectName,
+            }
+            impl ::core::fmt::Debug for ObjectId {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("ObjectId")
+                        .field("container", &self.container)
+                        .field("object", &self.object)
+                        .finish()
+                }
+            }
+            /// A reference to a value that will be written to a blobstore.
+            ///
+            /// To write a value to a blobstore, create an `outgoing-value` and write to
+            /// the stream returned by `outgoing-value-write-body`, then pass the value
+            /// to `container.write-data`.
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct OutgoingValue {
+                handle: _rt::Resource<OutgoingValue>,
+            }
+            impl OutgoingValue {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for OutgoingValue {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]outgoing-value"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            /// A reference to a value read from a blobstore.
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct IncomingValue {
+                handle: _rt::Resource<IncomingValue>,
+            }
+            impl IncomingValue {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for IncomingValue {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]incoming-value"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            /// A synchronous body — the full contents as a byte list.
+            pub type IncomingValueSyncBody = _rt::Vec<u8>;
+            /// An asynchronous body — the contents as an input stream.
+            pub type IncomingValueAsyncBody = InputStream;
+            impl OutgoingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Creates a new `outgoing-value` for writing to the blobstore.
+                pub fn new_outgoing_value() -> OutgoingValue {
+                    unsafe {
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[static]outgoing-value.new-outgoing-value"]
+                            fn wit_import0() -> i32;
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import0() -> i32 {
+                            unreachable!()
+                        }
+                        let ret = unsafe { wit_import0() };
+                        unsafe { OutgoingValue::from_handle(ret as u32) }
+                    }
+                }
+            }
+            impl OutgoingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns a stream for writing the value's body.
+                pub fn outgoing_value_write_body(&self) -> Result<OutputStream, ()> {
+                    unsafe {
+                        #[repr(align(4))]
+                        struct RetArea([::core::mem::MaybeUninit<u8>; 8]);
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 8],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]outgoing-value.outgoing-value-write-body"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result4 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0.add(4).cast::<i32>();
+                                    unsafe {
+                                        super::super::super::wasi::io::streams::OutputStream::from_handle(
+                                            l3 as u32,
+                                        )
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = ();
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result4
+                    }
+                }
+            }
+            impl OutgoingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Finalizes the write of the `outgoing-value`'s body.
+                ///
+                /// This should be called after writing the body of the `outgoing-value`
+                /// and after calling `write-data`.
+                pub fn finish(this: OutgoingValue) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[static]outgoing-value.finish"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((&this).take_handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result6 = match l2 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    let bytes5 = _rt::Vec::from_raw_parts(
+                                        l3.cast(),
+                                        len5,
+                                        len5,
+                                    );
+                                    _rt::string_lift(bytes5)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result6
+                    }
+                }
+            }
+            impl IncomingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Consumes the value synchronously and returns the contents as a list
+                /// of bytes.
+                pub fn incoming_value_consume_sync(
+                    this: IncomingValue,
+                ) -> Result<IncomingValueSyncBody, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[static]incoming-value.incoming-value-consume-sync"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((&this).take_handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result9 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    _rt::Vec::from_raw_parts(l3.cast(), len5, len5)
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l6 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l7 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len8 = l7;
+                                    let bytes8 = _rt::Vec::from_raw_parts(
+                                        l6.cast(),
+                                        len8,
+                                        len8,
+                                    );
+                                    _rt::string_lift(bytes8)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result9
+                    }
+                }
+            }
+            impl IncomingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Consumes the value asynchronously and returns the contents as an
+                /// `input-stream`.
+                pub fn incoming_value_consume_async(
+                    this: IncomingValue,
+                ) -> Result<IncomingValueAsyncBody, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[static]incoming-value.incoming-value-consume-async"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((&this).take_handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result7 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<i32>();
+                                    unsafe {
+                                        super::super::super::wasi::io::streams::InputStream::from_handle(
+                                            l3 as u32,
+                                        )
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l4 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l5 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len6 = l5;
+                                    let bytes6 = _rt::Vec::from_raw_parts(
+                                        l4.cast(),
+                                        len6,
+                                        len6,
+                                    );
+                                    _rt::string_lift(bytes6)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result7
+                    }
+                }
+            }
+            impl IncomingValue {
+                #[allow(unused_unsafe, clippy::all)]
+                /// The size of the value, in bytes.
+                pub fn size(&self) -> u64 {
+                    unsafe {
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:blobstore/types@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]incoming-value.size"]
+                            fn wit_import0(_: i32) -> i64;
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import0(_: i32) -> i64 {
+                            unreachable!()
+                        }
+                        let ret = unsafe { wit_import0((self).handle() as i32) };
+                        ret as u64
+                    }
+                }
+            }
+        }
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod container {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            pub type ContainerMetadata = super::super::super::wasi::blobstore::types::ContainerMetadata;
+            pub type Error = super::super::super::wasi::blobstore::types::Error;
+            pub type IncomingValue = super::super::super::wasi::blobstore::types::IncomingValue;
+            pub type ObjectMetadata = super::super::super::wasi::blobstore::types::ObjectMetadata;
+            pub type ObjectName = super::super::super::wasi::blobstore::types::ObjectName;
+            pub type OutgoingValue = super::super::super::wasi::blobstore::types::OutgoingValue;
+            /// A container (aka bucket) in a blobstore.
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct Container {
+                handle: _rt::Resource<Container>,
+            }
+            impl Container {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for Container {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]container"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            /// A cursor over object names in a container.
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct StreamObjectNames {
+                handle: _rt::Resource<StreamObjectNames>,
+            }
+            impl StreamObjectNames {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for StreamObjectNames {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]stream-object-names"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns container name.
+                pub fn name(&self) -> Result<_rt::String, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.name"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result9 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    let bytes5 = _rt::Vec::from_raw_parts(
+                                        l3.cast(),
+                                        len5,
+                                        len5,
+                                    );
+                                    _rt::string_lift(bytes5)
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l6 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l7 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len8 = l7;
+                                    let bytes8 = _rt::Vec::from_raw_parts(
+                                        l6.cast(),
+                                        len8,
+                                        len8,
+                                    );
+                                    _rt::string_lift(bytes8)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result9
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns container metadata.
+                pub fn info(&self) -> Result<ContainerMetadata, Error> {
+                    unsafe {
+                        #[repr(align(8))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 16 + 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 16
+                                + 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.info"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result10 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0.add(8).cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    let bytes5 = _rt::Vec::from_raw_parts(
+                                        l3.cast(),
+                                        len5,
+                                        len5,
+                                    );
+                                    let l6 = *ptr0
+                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<i64>();
+                                    super::super::super::wasi::blobstore::types::ContainerMetadata {
+                                        name: _rt::string_lift(bytes5),
+                                        created_at: l6 as u64,
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l7 = *ptr0.add(8).cast::<*mut u8>();
+                                    let l8 = *ptr0
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len9 = l8;
+                                    let bytes9 = _rt::Vec::from_raw_parts(
+                                        l7.cast(),
+                                        len9,
+                                        len9,
+                                    );
+                                    _rt::string_lift(bytes9)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result10
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Retrieves an object or part of an object from the container.
+                ///
+                /// Returns an `incoming-value` that the caller can use to get the
+                /// object's data. The `start` and `end` parameters are inclusive
+                /// offsets, e.g. `get-data(0, 99)` returns the first 100 bytes; use
+                /// `end = u64::MAX` for "to the end".
+                pub fn get_data(
+                    &self,
+                    name: &str,
+                    start: u64,
+                    end: u64,
+                ) -> Result<IncomingValue, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = name;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.get-data"]
+                            fn wit_import2(
+                                _: i32,
+                                _: *mut u8,
+                                _: usize,
+                                _: i64,
+                                _: i64,
+                                _: *mut u8,
+                            );
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: i64,
+                            _: i64,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                _rt::as_i64(&start),
+                                _rt::as_i64(&end),
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result8 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = *ptr1
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<i32>();
+                                    unsafe {
+                                        super::super::super::wasi::blobstore::types::IncomingValue::from_handle(
+                                            l4 as u32,
+                                        )
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = *ptr1
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l6 = *ptr1
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len7 = l6;
+                                    let bytes7 = _rt::Vec::from_raw_parts(
+                                        l5.cast(),
+                                        len7,
+                                        len7,
+                                    );
+                                    _rt::string_lift(bytes7)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result8
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Creates or replaces an object with the given name.
+                ///
+                /// `data` is an `outgoing-value` whose body the guest has already
+                /// written; call `outgoing-value.finish` after this call.
+                pub fn write_data(
+                    &self,
+                    name: &str,
+                    data: &OutgoingValue,
+                ) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = name;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.write-data"]
+                            fn wit_import2(
+                                _: i32,
+                                _: *mut u8,
+                                _: usize,
+                                _: i32,
+                                _: *mut u8,
+                            );
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: i32,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                (data).handle() as i32,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result7 = match l3 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l4 = *ptr1
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l5 = *ptr1
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len6 = l5;
+                                    let bytes6 = _rt::Vec::from_raw_parts(
+                                        l4.cast(),
+                                        len6,
+                                        len6,
+                                    );
+                                    _rt::string_lift(bytes6)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result7
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns a list of objects in the container.
+                pub fn list_objects(&self) -> Result<StreamObjectNames, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.list-objects"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result7 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<i32>();
+                                    unsafe { StreamObjectNames::from_handle(l3 as u32) }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l4 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l5 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len6 = l5;
+                                    let bytes6 = _rt::Vec::from_raw_parts(
+                                        l4.cast(),
+                                        len6,
+                                        len6,
+                                    );
+                                    _rt::string_lift(bytes6)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result7
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Deletes an object, or does nothing if it does not exist.
+                pub fn delete_object(&self, name: &str) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = name;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.delete-object"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result7 = match l3 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l4 = *ptr1
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l5 = *ptr1
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len6 = l5;
+                                    let bytes6 = _rt::Vec::from_raw_parts(
+                                        l4.cast(),
+                                        len6,
+                                        len6,
+                                    );
+                                    _rt::string_lift(bytes6)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result7
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Deletes a list of objects; objects that do not exist are ignored.
+                pub fn delete_objects(&self, names: &[ObjectName]) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec1 = names;
+                        let len1 = vec1.len();
+                        let layout1 = _rt::alloc::Layout::from_size_align_unchecked(
+                            vec1.len() * (2 * ::core::mem::size_of::<*const u8>()),
+                            ::core::mem::size_of::<*const u8>(),
+                        );
+                        let result1 = if layout1.size() != 0 {
+                            let ptr = _rt::alloc::alloc(layout1).cast::<u8>();
+                            if ptr.is_null() {
+                                _rt::alloc::handle_alloc_error(layout1);
+                            }
+                            ptr
+                        } else {
+                            ::core::ptr::null_mut()
+                        };
+                        for (i, e) in vec1.into_iter().enumerate() {
+                            let base = result1
+                                .add(i * (2 * ::core::mem::size_of::<*const u8>()));
+                            {
+                                let vec0 = e;
+                                let ptr0 = vec0.as_ptr().cast::<u8>();
+                                let len0 = vec0.len();
+                                *base
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>() = len0;
+                                *base.add(0).cast::<*mut u8>() = ptr0.cast_mut();
+                            }
+                        }
+                        let ptr2 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.delete-objects"]
+                            fn wit_import3(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import3(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import3((self).handle() as i32, result1, len1, ptr2)
+                        };
+                        let l4 = i32::from(*ptr2.add(0).cast::<u8>());
+                        let result8 = match l4 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = *ptr2
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l6 = *ptr2
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len7 = l6;
+                                    let bytes7 = _rt::Vec::from_raw_parts(
+                                        l5.cast(),
+                                        len7,
+                                        len7,
+                                    );
+                                    _rt::string_lift(bytes7)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        if layout1.size() != 0 {
+                            _rt::alloc::dealloc(result1.cast(), layout1);
+                        }
+                        result8
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns whether an object exists in the container.
+                pub fn has_object(&self, name: &str) -> Result<bool, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = name;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.has-object"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result8 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    _rt::bool_lift(l4 as u8)
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = *ptr1
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l6 = *ptr1
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len7 = l6;
+                                    let bytes7 = _rt::Vec::from_raw_parts(
+                                        l5.cast(),
+                                        len7,
+                                        len7,
+                                    );
+                                    _rt::string_lift(bytes7)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result8
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns metadata about an object.
+                pub fn object_info(&self, name: &str) -> Result<ObjectMetadata, Error> {
+                    unsafe {
+                        #[repr(align(8))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 24 + 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 24
+                                + 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = name;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.object-info"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result15 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = *ptr1.add(8).cast::<*mut u8>();
+                                    let l5 = *ptr1
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len6 = l5;
+                                    let bytes6 = _rt::Vec::from_raw_parts(
+                                        l4.cast(),
+                                        len6,
+                                        len6,
+                                    );
+                                    let l7 = *ptr1
+                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l8 = *ptr1
+                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len9 = l8;
+                                    let bytes9 = _rt::Vec::from_raw_parts(
+                                        l7.cast(),
+                                        len9,
+                                        len9,
+                                    );
+                                    let l10 = *ptr1
+                                        .add(8 + 4 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<i64>();
+                                    let l11 = *ptr1
+                                        .add(16 + 4 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<i64>();
+                                    super::super::super::wasi::blobstore::types::ObjectMetadata {
+                                        name: _rt::string_lift(bytes6),
+                                        container: _rt::string_lift(bytes9),
+                                        created_at: l10 as u64,
+                                        size: l11 as u64,
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l12 = *ptr1.add(8).cast::<*mut u8>();
+                                    let l13 = *ptr1
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len14 = l13;
+                                    let bytes14 = _rt::Vec::from_raw_parts(
+                                        l12.cast(),
+                                        len14,
+                                        len14,
+                                    );
+                                    _rt::string_lift(bytes14)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result15
+                    }
+                }
+            }
+            impl Container {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Deletes all objects in the container.
+                pub fn clear(&self) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]container.clear"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result6 = match l2 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    let bytes5 = _rt::Vec::from_raw_parts(
+                                        l3.cast(),
+                                        len5,
+                                        len5,
+                                    );
+                                    _rt::string_lift(bytes5)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result6
+                    }
+                }
+            }
+            impl StreamObjectNames {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns the next batch of object names (up to `len`), plus a flag
+                /// indicating whether the stream is finished.
+                pub fn read_stream_object_names(
+                    &self,
+                    len: u64,
+                ) -> Result<(_rt::Vec<ObjectName>, bool), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 4
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]stream-object-names.read-stream-object-names"]
+                            fn wit_import1(_: i32, _: i64, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: i64, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import1((self).handle() as i32, _rt::as_i64(&len), ptr0)
+                        };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result13 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let base8 = l3;
+                                    let len8 = l4;
+                                    let mut result8 = _rt::Vec::with_capacity(len8);
+                                    for i in 0..len8 {
+                                        let base = base8
+                                            .add(i * (2 * ::core::mem::size_of::<*const u8>()));
+                                        let e8 = {
+                                            let l5 = *base.add(0).cast::<*mut u8>();
+                                            let l6 = *base
+                                                .add(::core::mem::size_of::<*const u8>())
+                                                .cast::<usize>();
+                                            let len7 = l6;
+                                            let bytes7 = _rt::Vec::from_raw_parts(
+                                                l5.cast(),
+                                                len7,
+                                                len7,
+                                            );
+                                            _rt::string_lift(bytes7)
+                                        };
+                                        result8.push(e8);
+                                    }
+                                    _rt::cabi_dealloc(
+                                        base8,
+                                        len8 * (2 * ::core::mem::size_of::<*const u8>()),
+                                        ::core::mem::size_of::<*const u8>(),
+                                    );
+                                    let l9 = i32::from(
+                                        *ptr0
+                                            .add(3 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<u8>(),
+                                    );
+                                    (result8, _rt::bool_lift(l9 as u8))
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l10 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l11 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len12 = l11;
+                                    let bytes12 = _rt::Vec::from_raw_parts(
+                                        l10.cast(),
+                                        len12,
+                                        len12,
+                                    );
+                                    _rt::string_lift(bytes12)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result13
+                    }
+                }
+            }
+            impl StreamObjectNames {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Skips the next `num` object names; returns the number skipped plus a
+                /// flag indicating whether the stream is finished.
+                pub fn skip_stream_object_names(
+                    &self,
+                    num: u64,
+                ) -> Result<(u64, bool), Error> {
+                    unsafe {
+                        #[repr(align(8))]
+                        struct RetArea([::core::mem::MaybeUninit<u8>; 24]);
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 24],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(
+                            wasm_import_module = "wasi:blobstore/container@0.2.0-draft"
+                        )]
+                        unsafe extern "C" {
+                            #[link_name = "[method]stream-object-names.skip-stream-object-names"]
+                            fn wit_import1(_: i32, _: i64, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: i64, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import1((self).handle() as i32, _rt::as_i64(&num), ptr0)
+                        };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result8 = match l2 {
+                            0 => {
+                                let e = {
+                                    let l3 = *ptr0.add(8).cast::<i64>();
+                                    let l4 = i32::from(*ptr0.add(16).cast::<u8>());
+                                    (l3 as u64, _rt::bool_lift(l4 as u8))
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = *ptr0.add(8).cast::<*mut u8>();
+                                    let l6 = *ptr0
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len7 = l6;
+                                    let bytes7 = _rt::Vec::from_raw_parts(
+                                        l5.cast(),
+                                        len7,
+                                        len7,
+                                    );
+                                    _rt::string_lift(bytes7)
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result8
+                    }
+                }
+            }
+        }
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod blobstore {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            pub type Container = super::super::super::wasi::blobstore::container::Container;
+            pub type Error = super::super::super::wasi::blobstore::types::Error;
+            pub type ContainerName = super::super::super::wasi::blobstore::types::ContainerName;
+            pub type ObjectId = super::super::super::wasi::blobstore::types::ObjectId;
+            #[allow(unused_unsafe, clippy::all)]
+            /// Creates a new, empty container.
+            pub fn create_container(name: &str) -> Result<Container, Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "create-container"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result8 = match l3 {
+                        0 => {
+                            let e = {
+                                let l4 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<i32>();
+                                unsafe {
+                                    super::super::super::wasi::blobstore::container::Container::from_handle(
+                                        l4 as u32,
+                                    )
+                                }
+                            };
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l5 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l6 = *ptr1
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len7 = l6;
+                                let bytes7 = _rt::Vec::from_raw_parts(
+                                    l5.cast(),
+                                    len7,
+                                    len7,
+                                );
+                                _rt::string_lift(bytes7)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result8
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Gets a reference to an existing container.
+            pub fn get_container(name: &str) -> Result<Container, Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "get-container"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result8 = match l3 {
+                        0 => {
+                            let e = {
+                                let l4 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<i32>();
+                                unsafe {
+                                    super::super::super::wasi::blobstore::container::Container::from_handle(
+                                        l4 as u32,
+                                    )
+                                }
+                            };
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l5 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l6 = *ptr1
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len7 = l6;
+                                let bytes7 = _rt::Vec::from_raw_parts(
+                                    l5.cast(),
+                                    len7,
+                                    len7,
+                                );
+                                _rt::string_lift(bytes7)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result8
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Deletes a container and all objects in it.
+            pub fn delete_container(name: &str) -> Result<(), Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "delete-container"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result7 = match l3 {
+                        0 => {
+                            let e = ();
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l4 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l5 = *ptr1
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len6 = l5;
+                                let bytes6 = _rt::Vec::from_raw_parts(
+                                    l4.cast(),
+                                    len6,
+                                    len6,
+                                );
+                                _rt::string_lift(bytes6)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result7
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Returns whether the container exists.
+            pub fn container_exists(name: &str) -> Result<bool, Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = name;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "container-exists"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result8 = match l3 {
+                        0 => {
+                            let e = {
+                                let l4 = i32::from(
+                                    *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                );
+                                _rt::bool_lift(l4 as u8)
+                            };
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l5 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l6 = *ptr1
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len7 = l6;
+                                let bytes7 = _rt::Vec::from_raw_parts(
+                                    l5.cast(),
+                                    len7,
+                                    len7,
+                                );
+                                _rt::string_lift(bytes7)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result8
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Copies an object, optionally to a different container.
+            pub fn copy_object(src: &ObjectId, dest: &ObjectId) -> Result<(), Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let super::super::super::wasi::blobstore::types::ObjectId {
+                        container: container0,
+                        object: object0,
+                    } = src;
+                    let vec1 = container0;
+                    let ptr1 = vec1.as_ptr().cast::<u8>();
+                    let len1 = vec1.len();
+                    let vec2 = object0;
+                    let ptr2 = vec2.as_ptr().cast::<u8>();
+                    let len2 = vec2.len();
+                    let super::super::super::wasi::blobstore::types::ObjectId {
+                        container: container3,
+                        object: object3,
+                    } = dest;
+                    let vec4 = container3;
+                    let ptr4 = vec4.as_ptr().cast::<u8>();
+                    let len4 = vec4.len();
+                    let vec5 = object3;
+                    let ptr5 = vec5.as_ptr().cast::<u8>();
+                    let len5 = vec5.len();
+                    let ptr6 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "copy-object"]
+                        fn wit_import7(
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        );
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import7(
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                    ) {
+                        unreachable!()
+                    }
+                    unsafe {
+                        wit_import7(
+                            ptr1.cast_mut(),
+                            len1,
+                            ptr2.cast_mut(),
+                            len2,
+                            ptr4.cast_mut(),
+                            len4,
+                            ptr5.cast_mut(),
+                            len5,
+                            ptr6,
+                        )
+                    };
+                    let l8 = i32::from(*ptr6.add(0).cast::<u8>());
+                    let result12 = match l8 {
+                        0 => {
+                            let e = ();
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l9 = *ptr6
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l10 = *ptr6
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len11 = l10;
+                                let bytes11 = _rt::Vec::from_raw_parts(
+                                    l9.cast(),
+                                    len11,
+                                    len11,
+                                );
+                                _rt::string_lift(bytes11)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result12
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Moves an object, optionally to a different container.
+            pub fn move_object(src: &ObjectId, dest: &ObjectId) -> Result<(), Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 3 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 3
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let super::super::super::wasi::blobstore::types::ObjectId {
+                        container: container0,
+                        object: object0,
+                    } = src;
+                    let vec1 = container0;
+                    let ptr1 = vec1.as_ptr().cast::<u8>();
+                    let len1 = vec1.len();
+                    let vec2 = object0;
+                    let ptr2 = vec2.as_ptr().cast::<u8>();
+                    let len2 = vec2.len();
+                    let super::super::super::wasi::blobstore::types::ObjectId {
+                        container: container3,
+                        object: object3,
+                    } = dest;
+                    let vec4 = container3;
+                    let ptr4 = vec4.as_ptr().cast::<u8>();
+                    let len4 = vec4.len();
+                    let vec5 = object3;
+                    let ptr5 = vec5.as_ptr().cast::<u8>();
+                    let len5 = vec5.len();
+                    let ptr6 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:blobstore/blobstore@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "move-object"]
+                        fn wit_import7(
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        );
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import7(
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                    ) {
+                        unreachable!()
+                    }
+                    unsafe {
+                        wit_import7(
+                            ptr1.cast_mut(),
+                            len1,
+                            ptr2.cast_mut(),
+                            len2,
+                            ptr4.cast_mut(),
+                            len4,
+                            ptr5.cast_mut(),
+                            len5,
+                            ptr6,
+                        )
+                    };
+                    let l8 = i32::from(*ptr6.add(0).cast::<u8>());
+                    let result12 = match l8 {
+                        0 => {
+                            let e = ();
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l9 = *ptr6
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<*mut u8>();
+                                let l10 = *ptr6
+                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                    .cast::<usize>();
+                                let len11 = l10;
+                                let bytes11 = _rt::Vec::from_raw_parts(
+                                    l9.cast(),
+                                    len11,
+                                    len11,
+                                );
+                                _rt::string_lift(bytes11)
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result12
+                }
+            }
+        }
+    }
     pub mod cli {
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod environment {
@@ -197,6 +2227,16 @@ pub mod wasi {
         }
     }
     pub mod clocks {
+        /// WASI Monotonic Clock is a clock API intended to let users measure elapsed
+        /// time.
+        ///
+        /// It is intended to be portable at least between Unix-family platforms and
+        /// Windows.
+        ///
+        /// A monotonic clock is a clock which has an unspecified initial value, and
+        /// successive reads of the clock will produce non-decreasing values.
+        ///
+        /// It is intended for measuring elapsed time.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod monotonic_clock {
             #[used]
@@ -204,9 +2244,17 @@ pub mod wasi {
             static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
             use super::super::super::_rt;
             pub type Pollable = super::super::super::wasi::io::poll::Pollable;
+            /// An instant in time, in nanoseconds. An instant is relative to an
+            /// unspecified initial value, and can only be compared to instances from
+            /// the same monotonic-clock.
             pub type Instant = u64;
+            /// A duration of time, in nanoseconds.
             pub type Duration = u64;
             #[allow(unused_unsafe, clippy::all)]
+            /// Read the current value of the clock.
+            ///
+            /// The clock is monotonic, therefore calling this function repeatedly will
+            /// produce a sequence of non-decreasing values.
             pub fn now() -> Instant {
                 unsafe {
                     #[cfg(target_arch = "wasm32")]
@@ -224,6 +2272,8 @@ pub mod wasi {
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
+            /// Query the resolution of the clock. Returns the duration of time
+            /// corresponding to a clock tick.
             pub fn resolution() -> Duration {
                 unsafe {
                     #[cfg(target_arch = "wasm32")]
@@ -241,6 +2291,8 @@ pub mod wasi {
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
+            /// Create a `pollable` which will resolve once the specified instant
+            /// occured.
             pub fn subscribe_instant(when: Instant) -> Pollable {
                 unsafe {
                     #[cfg(target_arch = "wasm32")]
@@ -262,6 +2314,9 @@ pub mod wasi {
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
+            /// Create a `pollable` which will resolve once the given duration has
+            /// elapsed, starting at the time at which this function was called.
+            /// occured.
             pub fn subscribe_duration(when: Duration) -> Pollable {
                 unsafe {
                     #[cfg(target_arch = "wasm32")]
@@ -407,7 +2462,7 @@ pub mod wasi {
                 }
             }
             /// These cases are inspired by the IANA HTTP Proxy Error Types:
-            /// https://www.iana.org/assignments/http-proxy-status/http-proxy-status.xhtml#table-http-proxy-error-types
+            ///   https://www.iana.org/assignments/http-proxy-status/http-proxy-status.xhtml#table-http-proxy-error-types
             #[derive(Clone)]
             pub enum ErrorCode {
                 DnsTimeout,
@@ -1135,6 +3190,572 @@ pub mod wasi {
                         }
                         unsafe { drop(_handle) };
                     }
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Attempts to extract a http-related `error` from the wasi:io `error`
+            /// provided.
+            ///
+            /// Stream operations which return
+            /// `wasi:io/stream/stream-error::last-operation-failed` have a payload of
+            /// type `wasi:io/error/error` with more information about the operation
+            /// that failed. This payload can be passed through to this function to see
+            /// if there's http-related information about the error to return.
+            ///
+            /// Note that this function is fallible because not all io-errors are
+            /// http-related errors.
+            pub fn http_error_code(err: &IoError) -> Option<ErrorCode> {
+                unsafe {
+                    #[repr(align(8))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 24 + 4 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 24
+                            + 4 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:http/types@0.2.0")]
+                    unsafe extern "C" {
+                        #[link_name = "http-error-code"]
+                        fn wit_import1(_: i32, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import1((err).handle() as i32, ptr0) };
+                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                    let result66 = match l2 {
+                        0 => None,
+                        1 => {
+                            let e = {
+                                let l3 = i32::from(*ptr0.add(8).cast::<u8>());
+                                let v65 = match l3 {
+                                    0 => ErrorCode::DnsTimeout,
+                                    1 => {
+                                        let e65 = {
+                                            let l4 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            let l8 = i32::from(
+                                                *ptr0
+                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<u8>(),
+                                            );
+                                            DnsErrorPayload {
+                                                rcode: match l4 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l5 = *ptr0
+                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<*mut u8>();
+                                                            let l6 = *ptr0
+                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<usize>();
+                                                            let len7 = l6;
+                                                            let bytes7 = _rt::Vec::from_raw_parts(
+                                                                l5.cast(),
+                                                                len7,
+                                                                len7,
+                                                            );
+                                                            _rt::string_lift(bytes7)
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                                info_code: match l8 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l9 = i32::from(
+                                                                *ptr0
+                                                                    .add(18 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                    .cast::<u16>(),
+                                                            );
+                                                            l9 as u16
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                            }
+                                        };
+                                        ErrorCode::DnsError(e65)
+                                    }
+                                    2 => ErrorCode::DestinationNotFound,
+                                    3 => ErrorCode::DestinationUnavailable,
+                                    4 => ErrorCode::DestinationIpProhibited,
+                                    5 => ErrorCode::DestinationIpUnroutable,
+                                    6 => ErrorCode::ConnectionRefused,
+                                    7 => ErrorCode::ConnectionTerminated,
+                                    8 => ErrorCode::ConnectionTimeout,
+                                    9 => ErrorCode::ConnectionReadTimeout,
+                                    10 => ErrorCode::ConnectionWriteTimeout,
+                                    11 => ErrorCode::ConnectionLimitReached,
+                                    12 => ErrorCode::TlsProtocolError,
+                                    13 => ErrorCode::TlsCertificateError,
+                                    14 => {
+                                        let e65 = {
+                                            let l10 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            let l12 = i32::from(
+                                                *ptr0
+                                                    .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<u8>(),
+                                            );
+                                            TlsAlertReceivedPayload {
+                                                alert_id: match l10 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l11 = i32::from(*ptr0.add(17).cast::<u8>());
+                                                            l11 as u8
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                                alert_message: match l12 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l13 = *ptr0
+                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<*mut u8>();
+                                                            let l14 = *ptr0
+                                                                .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<usize>();
+                                                            let len15 = l14;
+                                                            let bytes15 = _rt::Vec::from_raw_parts(
+                                                                l13.cast(),
+                                                                len15,
+                                                                len15,
+                                                            );
+                                                            _rt::string_lift(bytes15)
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                            }
+                                        };
+                                        ErrorCode::TlsAlertReceived(e65)
+                                    }
+                                    15 => ErrorCode::HttpRequestDenied,
+                                    16 => ErrorCode::HttpRequestLengthRequired,
+                                    17 => {
+                                        let e65 = {
+                                            let l16 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l16 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l17 = *ptr0.add(24).cast::<i64>();
+                                                        l17 as u64
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpRequestBodySize(e65)
+                                    }
+                                    18 => ErrorCode::HttpRequestMethodInvalid,
+                                    19 => ErrorCode::HttpRequestUriInvalid,
+                                    20 => ErrorCode::HttpRequestUriTooLong,
+                                    21 => {
+                                        let e65 = {
+                                            let l18 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l18 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l19 = *ptr0.add(20).cast::<i32>();
+                                                        l19 as u32
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpRequestHeaderSectionSize(e65)
+                                    }
+                                    22 => {
+                                        let e65 = {
+                                            let l20 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l20 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l21 = i32::from(
+                                                            *ptr0
+                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<u8>(),
+                                                        );
+                                                        let l25 = i32::from(
+                                                            *ptr0
+                                                                .add(16 + 4 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<u8>(),
+                                                        );
+                                                        FieldSizePayload {
+                                                            field_name: match l21 {
+                                                                0 => None,
+                                                                1 => {
+                                                                    let e = {
+                                                                        let l22 = *ptr0
+                                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<*mut u8>();
+                                                                        let l23 = *ptr0
+                                                                            .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<usize>();
+                                                                        let len24 = l23;
+                                                                        let bytes24 = _rt::Vec::from_raw_parts(
+                                                                            l22.cast(),
+                                                                            len24,
+                                                                            len24,
+                                                                        );
+                                                                        _rt::string_lift(bytes24)
+                                                                    };
+                                                                    Some(e)
+                                                                }
+                                                                _ => _rt::invalid_enum_discriminant(),
+                                                            },
+                                                            field_size: match l25 {
+                                                                0 => None,
+                                                                1 => {
+                                                                    let e = {
+                                                                        let l26 = *ptr0
+                                                                            .add(20 + 4 * ::core::mem::size_of::<*const u8>())
+                                                                            .cast::<i32>();
+                                                                        l26 as u32
+                                                                    };
+                                                                    Some(e)
+                                                                }
+                                                                _ => _rt::invalid_enum_discriminant(),
+                                                            },
+                                                        }
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpRequestHeaderSize(e65)
+                                    }
+                                    23 => {
+                                        let e65 = {
+                                            let l27 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l27 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l28 = *ptr0.add(20).cast::<i32>();
+                                                        l28 as u32
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpRequestTrailerSectionSize(e65)
+                                    }
+                                    24 => {
+                                        let e65 = {
+                                            let l29 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            let l33 = i32::from(
+                                                *ptr0
+                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<u8>(),
+                                            );
+                                            FieldSizePayload {
+                                                field_name: match l29 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l30 = *ptr0
+                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<*mut u8>();
+                                                            let l31 = *ptr0
+                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<usize>();
+                                                            let len32 = l31;
+                                                            let bytes32 = _rt::Vec::from_raw_parts(
+                                                                l30.cast(),
+                                                                len32,
+                                                                len32,
+                                                            );
+                                                            _rt::string_lift(bytes32)
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                                field_size: match l33 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l34 = *ptr0
+                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<i32>();
+                                                            l34 as u32
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                            }
+                                        };
+                                        ErrorCode::HttpRequestTrailerSize(e65)
+                                    }
+                                    25 => ErrorCode::HttpResponseIncomplete,
+                                    26 => {
+                                        let e65 = {
+                                            let l35 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l35 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l36 = *ptr0.add(20).cast::<i32>();
+                                                        l36 as u32
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseHeaderSectionSize(e65)
+                                    }
+                                    27 => {
+                                        let e65 = {
+                                            let l37 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            let l41 = i32::from(
+                                                *ptr0
+                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<u8>(),
+                                            );
+                                            FieldSizePayload {
+                                                field_name: match l37 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l38 = *ptr0
+                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<*mut u8>();
+                                                            let l39 = *ptr0
+                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<usize>();
+                                                            let len40 = l39;
+                                                            let bytes40 = _rt::Vec::from_raw_parts(
+                                                                l38.cast(),
+                                                                len40,
+                                                                len40,
+                                                            );
+                                                            _rt::string_lift(bytes40)
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                                field_size: match l41 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l42 = *ptr0
+                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<i32>();
+                                                            l42 as u32
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseHeaderSize(e65)
+                                    }
+                                    28 => {
+                                        let e65 = {
+                                            let l43 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l43 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l44 = *ptr0.add(24).cast::<i64>();
+                                                        l44 as u64
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseBodySize(e65)
+                                    }
+                                    29 => {
+                                        let e65 = {
+                                            let l45 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l45 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l46 = *ptr0.add(20).cast::<i32>();
+                                                        l46 as u32
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseTrailerSectionSize(e65)
+                                    }
+                                    30 => {
+                                        let e65 = {
+                                            let l47 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            let l51 = i32::from(
+                                                *ptr0
+                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<u8>(),
+                                            );
+                                            FieldSizePayload {
+                                                field_name: match l47 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l48 = *ptr0
+                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<*mut u8>();
+                                                            let l49 = *ptr0
+                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<usize>();
+                                                            let len50 = l49;
+                                                            let bytes50 = _rt::Vec::from_raw_parts(
+                                                                l48.cast(),
+                                                                len50,
+                                                                len50,
+                                                            );
+                                                            _rt::string_lift(bytes50)
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                                field_size: match l51 {
+                                                    0 => None,
+                                                    1 => {
+                                                        let e = {
+                                                            let l52 = *ptr0
+                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
+                                                                .cast::<i32>();
+                                                            l52 as u32
+                                                        };
+                                                        Some(e)
+                                                    }
+                                                    _ => _rt::invalid_enum_discriminant(),
+                                                },
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseTrailerSize(e65)
+                                    }
+                                    31 => {
+                                        let e65 = {
+                                            let l53 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l53 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l54 = *ptr0
+                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<*mut u8>();
+                                                        let l55 = *ptr0
+                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<usize>();
+                                                        let len56 = l55;
+                                                        let bytes56 = _rt::Vec::from_raw_parts(
+                                                            l54.cast(),
+                                                            len56,
+                                                            len56,
+                                                        );
+                                                        _rt::string_lift(bytes56)
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseTransferCoding(e65)
+                                    }
+                                    32 => {
+                                        let e65 = {
+                                            let l57 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l57 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l58 = *ptr0
+                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<*mut u8>();
+                                                        let l59 = *ptr0
+                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<usize>();
+                                                        let len60 = l59;
+                                                        let bytes60 = _rt::Vec::from_raw_parts(
+                                                            l58.cast(),
+                                                            len60,
+                                                            len60,
+                                                        );
+                                                        _rt::string_lift(bytes60)
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::HttpResponseContentCoding(e65)
+                                    }
+                                    33 => ErrorCode::HttpResponseTimeout,
+                                    34 => ErrorCode::HttpUpgradeFailed,
+                                    35 => ErrorCode::HttpProtocolError,
+                                    36 => ErrorCode::LoopDetected,
+                                    37 => ErrorCode::ConfigurationError,
+                                    n => {
+                                        debug_assert_eq!(n, 38, "invalid enum discriminant");
+                                        let e65 = {
+                                            let l61 = i32::from(*ptr0.add(16).cast::<u8>());
+                                            match l61 {
+                                                0 => None,
+                                                1 => {
+                                                    let e = {
+                                                        let l62 = *ptr0
+                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<*mut u8>();
+                                                        let l63 = *ptr0
+                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                            .cast::<usize>();
+                                                        let len64 = l63;
+                                                        let bytes64 = _rt::Vec::from_raw_parts(
+                                                            l62.cast(),
+                                                            len64,
+                                                            len64,
+                                                        );
+                                                        _rt::string_lift(bytes64)
+                                                    };
+                                                    Some(e)
+                                                }
+                                                _ => _rt::invalid_enum_discriminant(),
+                                            }
+                                        };
+                                        ErrorCode::InternalError(e65)
+                                    }
+                                };
+                                v65
+                            };
+                            Some(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result66
                 }
             }
             impl Fields {
@@ -5873,581 +8494,126 @@ pub mod wasi {
                     }
                 }
             }
-            #[allow(unused_unsafe, clippy::all)]
-            /// Attempts to extract a http-related `error` from the wasi:io `error`
-            /// provided.
-            ///
-            /// Stream operations which return
-            /// `wasi:io/stream/stream-error::last-operation-failed` have a payload of
-            /// type `wasi:io/error/error` with more information about the operation
-            /// that failed. This payload can be passed through to this function to see
-            /// if there's http-related information about the error to return.
-            ///
-            /// Note that this function is fallible because not all io-errors are
-            /// http-related errors.
-            pub fn http_error_code(err: &IoError) -> Option<ErrorCode> {
-                unsafe {
-                    #[repr(align(8))]
-                    struct RetArea(
-                        [::core::mem::MaybeUninit<
-                            u8,
-                        >; 24 + 4 * ::core::mem::size_of::<*const u8>()],
-                    );
-                    let mut ret_area = RetArea(
-                        [::core::mem::MaybeUninit::uninit(); 24
-                            + 4 * ::core::mem::size_of::<*const u8>()],
-                    );
-                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
-                    #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:http/types@0.2.0")]
-                    unsafe extern "C" {
-                        #[link_name = "http-error-code"]
-                        fn wit_import1(_: i32, _: *mut u8);
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
-                        unreachable!()
-                    }
-                    unsafe { wit_import1((err).handle() as i32, ptr0) };
-                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
-                    let result66 = match l2 {
-                        0 => None,
-                        1 => {
-                            let e = {
-                                let l3 = i32::from(*ptr0.add(8).cast::<u8>());
-                                let v65 = match l3 {
-                                    0 => ErrorCode::DnsTimeout,
-                                    1 => {
-                                        let e65 = {
-                                            let l4 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            let l8 = i32::from(
-                                                *ptr0
-                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<u8>(),
-                                            );
-                                            DnsErrorPayload {
-                                                rcode: match l4 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l5 = *ptr0
-                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<*mut u8>();
-                                                            let l6 = *ptr0
-                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<usize>();
-                                                            let len7 = l6;
-                                                            let bytes7 = _rt::Vec::from_raw_parts(
-                                                                l5.cast(),
-                                                                len7,
-                                                                len7,
-                                                            );
-                                                            _rt::string_lift(bytes7)
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                                info_code: match l8 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l9 = i32::from(
-                                                                *ptr0
-                                                                    .add(18 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                    .cast::<u16>(),
-                                                            );
-                                                            l9 as u16
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                            }
-                                        };
-                                        ErrorCode::DnsError(e65)
-                                    }
-                                    2 => ErrorCode::DestinationNotFound,
-                                    3 => ErrorCode::DestinationUnavailable,
-                                    4 => ErrorCode::DestinationIpProhibited,
-                                    5 => ErrorCode::DestinationIpUnroutable,
-                                    6 => ErrorCode::ConnectionRefused,
-                                    7 => ErrorCode::ConnectionTerminated,
-                                    8 => ErrorCode::ConnectionTimeout,
-                                    9 => ErrorCode::ConnectionReadTimeout,
-                                    10 => ErrorCode::ConnectionWriteTimeout,
-                                    11 => ErrorCode::ConnectionLimitReached,
-                                    12 => ErrorCode::TlsProtocolError,
-                                    13 => ErrorCode::TlsCertificateError,
-                                    14 => {
-                                        let e65 = {
-                                            let l10 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            let l12 = i32::from(
-                                                *ptr0
-                                                    .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<u8>(),
-                                            );
-                                            TlsAlertReceivedPayload {
-                                                alert_id: match l10 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l11 = i32::from(*ptr0.add(17).cast::<u8>());
-                                                            l11 as u8
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                                alert_message: match l12 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l13 = *ptr0
-                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<*mut u8>();
-                                                            let l14 = *ptr0
-                                                                .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<usize>();
-                                                            let len15 = l14;
-                                                            let bytes15 = _rt::Vec::from_raw_parts(
-                                                                l13.cast(),
-                                                                len15,
-                                                                len15,
-                                                            );
-                                                            _rt::string_lift(bytes15)
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                            }
-                                        };
-                                        ErrorCode::TlsAlertReceived(e65)
-                                    }
-                                    15 => ErrorCode::HttpRequestDenied,
-                                    16 => ErrorCode::HttpRequestLengthRequired,
-                                    17 => {
-                                        let e65 = {
-                                            let l16 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l16 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l17 = *ptr0.add(24).cast::<i64>();
-                                                        l17 as u64
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpRequestBodySize(e65)
-                                    }
-                                    18 => ErrorCode::HttpRequestMethodInvalid,
-                                    19 => ErrorCode::HttpRequestUriInvalid,
-                                    20 => ErrorCode::HttpRequestUriTooLong,
-                                    21 => {
-                                        let e65 = {
-                                            let l18 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l18 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l19 = *ptr0.add(20).cast::<i32>();
-                                                        l19 as u32
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpRequestHeaderSectionSize(e65)
-                                    }
-                                    22 => {
-                                        let e65 = {
-                                            let l20 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l20 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l21 = i32::from(
-                                                            *ptr0
-                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<u8>(),
-                                                        );
-                                                        let l25 = i32::from(
-                                                            *ptr0
-                                                                .add(16 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<u8>(),
-                                                        );
-                                                        FieldSizePayload {
-                                                            field_name: match l21 {
-                                                                0 => None,
-                                                                1 => {
-                                                                    let e = {
-                                                                        let l22 = *ptr0
-                                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<*mut u8>();
-                                                                        let l23 = *ptr0
-                                                                            .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<usize>();
-                                                                        let len24 = l23;
-                                                                        let bytes24 = _rt::Vec::from_raw_parts(
-                                                                            l22.cast(),
-                                                                            len24,
-                                                                            len24,
-                                                                        );
-                                                                        _rt::string_lift(bytes24)
-                                                                    };
-                                                                    Some(e)
-                                                                }
-                                                                _ => _rt::invalid_enum_discriminant(),
-                                                            },
-                                                            field_size: match l25 {
-                                                                0 => None,
-                                                                1 => {
-                                                                    let e = {
-                                                                        let l26 = *ptr0
-                                                                            .add(20 + 4 * ::core::mem::size_of::<*const u8>())
-                                                                            .cast::<i32>();
-                                                                        l26 as u32
-                                                                    };
-                                                                    Some(e)
-                                                                }
-                                                                _ => _rt::invalid_enum_discriminant(),
-                                                            },
-                                                        }
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpRequestHeaderSize(e65)
-                                    }
-                                    23 => {
-                                        let e65 = {
-                                            let l27 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l27 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l28 = *ptr0.add(20).cast::<i32>();
-                                                        l28 as u32
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpRequestTrailerSectionSize(e65)
-                                    }
-                                    24 => {
-                                        let e65 = {
-                                            let l29 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            let l33 = i32::from(
-                                                *ptr0
-                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<u8>(),
-                                            );
-                                            FieldSizePayload {
-                                                field_name: match l29 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l30 = *ptr0
-                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<*mut u8>();
-                                                            let l31 = *ptr0
-                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<usize>();
-                                                            let len32 = l31;
-                                                            let bytes32 = _rt::Vec::from_raw_parts(
-                                                                l30.cast(),
-                                                                len32,
-                                                                len32,
-                                                            );
-                                                            _rt::string_lift(bytes32)
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                                field_size: match l33 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l34 = *ptr0
-                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<i32>();
-                                                            l34 as u32
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                            }
-                                        };
-                                        ErrorCode::HttpRequestTrailerSize(e65)
-                                    }
-                                    25 => ErrorCode::HttpResponseIncomplete,
-                                    26 => {
-                                        let e65 = {
-                                            let l35 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l35 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l36 = *ptr0.add(20).cast::<i32>();
-                                                        l36 as u32
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseHeaderSectionSize(e65)
-                                    }
-                                    27 => {
-                                        let e65 = {
-                                            let l37 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            let l41 = i32::from(
-                                                *ptr0
-                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<u8>(),
-                                            );
-                                            FieldSizePayload {
-                                                field_name: match l37 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l38 = *ptr0
-                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<*mut u8>();
-                                                            let l39 = *ptr0
-                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<usize>();
-                                                            let len40 = l39;
-                                                            let bytes40 = _rt::Vec::from_raw_parts(
-                                                                l38.cast(),
-                                                                len40,
-                                                                len40,
-                                                            );
-                                                            _rt::string_lift(bytes40)
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                                field_size: match l41 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l42 = *ptr0
-                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<i32>();
-                                                            l42 as u32
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseHeaderSize(e65)
-                                    }
-                                    28 => {
-                                        let e65 = {
-                                            let l43 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l43 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l44 = *ptr0.add(24).cast::<i64>();
-                                                        l44 as u64
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseBodySize(e65)
-                                    }
-                                    29 => {
-                                        let e65 = {
-                                            let l45 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l45 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l46 = *ptr0.add(20).cast::<i32>();
-                                                        l46 as u32
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseTrailerSectionSize(e65)
-                                    }
-                                    30 => {
-                                        let e65 = {
-                                            let l47 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            let l51 = i32::from(
-                                                *ptr0
-                                                    .add(16 + 3 * ::core::mem::size_of::<*const u8>())
-                                                    .cast::<u8>(),
-                                            );
-                                            FieldSizePayload {
-                                                field_name: match l47 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l48 = *ptr0
-                                                                .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<*mut u8>();
-                                                            let l49 = *ptr0
-                                                                .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<usize>();
-                                                            let len50 = l49;
-                                                            let bytes50 = _rt::Vec::from_raw_parts(
-                                                                l48.cast(),
-                                                                len50,
-                                                                len50,
-                                                            );
-                                                            _rt::string_lift(bytes50)
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                                field_size: match l51 {
-                                                    0 => None,
-                                                    1 => {
-                                                        let e = {
-                                                            let l52 = *ptr0
-                                                                .add(20 + 3 * ::core::mem::size_of::<*const u8>())
-                                                                .cast::<i32>();
-                                                            l52 as u32
-                                                        };
-                                                        Some(e)
-                                                    }
-                                                    _ => _rt::invalid_enum_discriminant(),
-                                                },
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseTrailerSize(e65)
-                                    }
-                                    31 => {
-                                        let e65 = {
-                                            let l53 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l53 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l54 = *ptr0
-                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>();
-                                                        let l55 = *ptr0
-                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>();
-                                                        let len56 = l55;
-                                                        let bytes56 = _rt::Vec::from_raw_parts(
-                                                            l54.cast(),
-                                                            len56,
-                                                            len56,
-                                                        );
-                                                        _rt::string_lift(bytes56)
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseTransferCoding(e65)
-                                    }
-                                    32 => {
-                                        let e65 = {
-                                            let l57 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l57 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l58 = *ptr0
-                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>();
-                                                        let l59 = *ptr0
-                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>();
-                                                        let len60 = l59;
-                                                        let bytes60 = _rt::Vec::from_raw_parts(
-                                                            l58.cast(),
-                                                            len60,
-                                                            len60,
-                                                        );
-                                                        _rt::string_lift(bytes60)
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::HttpResponseContentCoding(e65)
-                                    }
-                                    33 => ErrorCode::HttpResponseTimeout,
-                                    34 => ErrorCode::HttpUpgradeFailed,
-                                    35 => ErrorCode::HttpProtocolError,
-                                    36 => ErrorCode::LoopDetected,
-                                    37 => ErrorCode::ConfigurationError,
-                                    n => {
-                                        debug_assert_eq!(n, 38, "invalid enum discriminant");
-                                        let e65 = {
-                                            let l61 = i32::from(*ptr0.add(16).cast::<u8>());
-                                            match l61 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l62 = *ptr0
-                                                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>();
-                                                        let l63 = *ptr0
-                                                            .add(16 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>();
-                                                        let len64 = l63;
-                                                        let bytes64 = _rt::Vec::from_raw_parts(
-                                                            l62.cast(),
-                                                            len64,
-                                                            len64,
-                                                        );
-                                                        _rt::string_lift(bytes64)
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            }
-                                        };
-                                        ErrorCode::InternalError(e65)
-                                    }
-                                };
-                                v65
-                            };
-                            Some(e)
-                        }
-                        _ => _rt::invalid_enum_discriminant(),
-                    };
-                    result66
-                }
-            }
         }
     }
     pub mod io {
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod error {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            /// A resource which represents some error information.
+            ///
+            /// The only method provided by this resource is `to-debug-string`,
+            /// which provides some human-readable information about the error.
+            ///
+            /// In the `wasi:io` package, this resource is returned through the
+            /// `wasi:io/streams/stream-error` type.
+            ///
+            /// To provide more specific error information, other interfaces may
+            /// provide functions to further "downcast" this error into more specific
+            /// error information. For example, `error`s returned in streams derived
+            /// from filesystem types to be described using the filesystem's own
+            /// error-code type, using the function
+            /// `wasi:filesystem/types/filesystem-error-code`, which takes a parameter
+            /// `borrow<error>` and returns
+            /// `option<wasi:filesystem/types/error-code>`.
+            ///
+            /// The set of functions which can "downcast" an `error` into a more
+            /// concrete type is open.
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct Error {
+                handle: _rt::Resource<Error>,
+            }
+            impl Error {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for Error {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(wasm_import_module = "wasi:io/error@0.2.0")]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]error"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            impl Error {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Returns a string that is suitable to assist humans in debugging
+                /// this error.
+                ///
+                /// WARNING: The returned string should not be consumed mechanically!
+                /// It may change across platforms, hosts, or other implementation
+                /// details. Parsing this string is a major platform-compatibility
+                /// hazard.
+                pub fn to_debug_string(&self) -> _rt::String {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 2
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:io/error@0.2.0")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]error.to-debug-string"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = *ptr0.add(0).cast::<*mut u8>();
+                        let l3 = *ptr0
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let len4 = l3;
+                        let bytes4 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
+                        let result5 = _rt::string_lift(bytes4);
+                        result5
+                    }
+                }
+            }
+        }
+        /// A poll API intended to let users wait for I/O events on multiple handles
+        /// at once.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod poll {
             #[used]
             #[doc(hidden)]
             static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
             use super::super::super::_rt;
+            /// `pollable` represents a single I/O event which may be ready, or not.
             #[derive(Debug)]
             #[repr(transparent)]
             pub struct Pollable {
@@ -6487,6 +8653,9 @@ pub mod wasi {
             }
             impl Pollable {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Return the readiness of a pollable. This function never blocks.
+                ///
+                /// Returns `true` when the pollable is ready, and `false` otherwise.
                 pub fn ready(&self) -> bool {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -6506,6 +8675,11 @@ pub mod wasi {
             }
             impl Pollable {
                 #[allow(unused_unsafe, clippy::all)]
+                /// `block` returns immediately if the pollable is ready, and otherwise
+                /// blocks until ready.
+                ///
+                /// This function is equivalent to calling `poll.poll` on a list
+                /// containing only this pollable.
                 pub fn block(&self) -> () {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -6523,6 +8697,24 @@ pub mod wasi {
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
+            /// Poll for completion on a set of pollables.
+            ///
+            /// This function takes a list of pollables, which identify I/O sources of
+            /// interest, and waits until one or more of the events is ready for I/O.
+            ///
+            /// The result `list<u32>` contains one or more indices of handles in the
+            /// argument list that is ready for I/O.
+            ///
+            /// If the list contains more elements than can be indexed with a `u32`
+            /// value, this function traps.
+            ///
+            /// A timeout can be implemented by adding a pollable from the
+            /// wasi-clocks API to the list.
+            ///
+            /// This function does not return a `result`; polling in itself does not
+            /// do any I/O so it doesn't fail. If any of the I/O sources identified by
+            /// the pollables has an error, it is indicated by marking the source as
+            /// being reaedy for I/O.
             pub fn poll(in_: &[&Pollable]) -> _rt::Vec<u32> {
                 unsafe {
                     #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
@@ -6582,88 +8774,11 @@ pub mod wasi {
                 }
             }
         }
-        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-        pub mod error {
-            #[used]
-            #[doc(hidden)]
-            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
-            use super::super::super::_rt;
-            #[derive(Debug)]
-            #[repr(transparent)]
-            pub struct Error {
-                handle: _rt::Resource<Error>,
-            }
-            impl Error {
-                #[doc(hidden)]
-                pub unsafe fn from_handle(handle: u32) -> Self {
-                    Self {
-                        handle: unsafe { _rt::Resource::from_handle(handle) },
-                    }
-                }
-                #[doc(hidden)]
-                pub fn take_handle(&self) -> u32 {
-                    _rt::Resource::take_handle(&self.handle)
-                }
-                #[doc(hidden)]
-                pub fn handle(&self) -> u32 {
-                    _rt::Resource::handle(&self.handle)
-                }
-            }
-            unsafe impl _rt::WasmResource for Error {
-                #[inline]
-                unsafe fn drop(_handle: u32) {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unreachable!();
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        #[link(wasm_import_module = "wasi:io/error@0.2.0")]
-                        unsafe extern "C" {
-                            #[link_name = "[resource-drop]error"]
-                            fn drop(_: u32);
-                        }
-                        unsafe { drop(_handle) };
-                    }
-                }
-            }
-            impl Error {
-                #[allow(unused_unsafe, clippy::all)]
-                pub fn to_debug_string(&self) -> _rt::String {
-                    unsafe {
-                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
-                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
-                        struct RetArea(
-                            [::core::mem::MaybeUninit<
-                                u8,
-                            >; 2 * ::core::mem::size_of::<*const u8>()],
-                        );
-                        let mut ret_area = RetArea(
-                            [::core::mem::MaybeUninit::uninit(); 2
-                                * ::core::mem::size_of::<*const u8>()],
-                        );
-                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
-                        #[cfg(target_arch = "wasm32")]
-                        #[link(wasm_import_module = "wasi:io/error@0.2.0")]
-                        unsafe extern "C" {
-                            #[link_name = "[method]error.to-debug-string"]
-                            fn wit_import1(_: i32, _: *mut u8);
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
-                            unreachable!()
-                        }
-                        unsafe { wit_import1((self).handle() as i32, ptr0) };
-                        let l2 = *ptr0.add(0).cast::<*mut u8>();
-                        let l3 = *ptr0
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<usize>();
-                        let len4 = l3;
-                        let bytes4 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
-                        let result5 = _rt::string_lift(bytes4);
-                        result5
-                    }
-                }
-            }
-        }
+        /// WASI I/O is an I/O abstraction API which is currently focused on providing
+        /// stream types.
+        ///
+        /// In the future, the component model is expected to add built-in stream types;
+        /// when it does, they are expected to subsume this API.
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod streams {
             #[used]
@@ -6672,8 +8787,15 @@ pub mod wasi {
             use super::super::super::_rt;
             pub type Error = super::super::super::wasi::io::error::Error;
             pub type Pollable = super::super::super::wasi::io::poll::Pollable;
+            /// An error for input-stream and output-stream operations.
             pub enum StreamError {
+                /// The last operation (a write or flush) failed before completion.
+                ///
+                /// More information is available in the `error` payload.
                 LastOperationFailed(Error),
+                /// The stream is closed: no more input will be accepted by the
+                /// stream. A closed output-stream will return this error on all
+                /// future operations.
                 Closed,
             }
             impl ::core::fmt::Debug for StreamError {
@@ -6702,6 +8824,14 @@ pub mod wasi {
                 }
             }
             impl std::error::Error for StreamError {}
+            /// An input bytestream.
+            ///
+            /// `input-stream`s are *non-blocking* to the extent practical on underlying
+            /// platforms. I/O operations always return promptly; if fewer bytes are
+            /// promptly available than requested, they return the number of bytes promptly
+            /// available, which could even be zero. To wait for data to be available,
+            /// use the `subscribe` function to obtain a `pollable` which can be polled
+            /// for using `wasi:io/poll`.
             #[derive(Debug)]
             #[repr(transparent)]
             pub struct InputStream {
@@ -6739,6 +8869,14 @@ pub mod wasi {
                     }
                 }
             }
+            /// An output bytestream.
+            ///
+            /// `output-stream`s are *non-blocking* to the extent practical on
+            /// underlying platforms. Except where specified otherwise, I/O operations also
+            /// always return promptly, after the number of bytes that can be written
+            /// promptly, which could even be zero. To wait for the stream to be ready to
+            /// accept data, the `subscribe` function to obtain a `pollable` which can be
+            /// polled for using `wasi:io/poll`.
             #[derive(Debug)]
             #[repr(transparent)]
             pub struct OutputStream {
@@ -6778,6 +8916,32 @@ pub mod wasi {
             }
             impl InputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Perform a non-blocking read from the stream.
+                ///
+                /// When the source of a `read` is binary data, the bytes from the source
+                /// are returned verbatim. When the source of a `read` is known to the
+                /// implementation to be text, bytes containing the UTF-8 encoding of the
+                /// text are returned.
+                ///
+                /// This function returns a list of bytes containing the read data,
+                /// when successful. The returned list will contain up to `len` bytes;
+                /// it may return fewer than requested, but not more. The list is
+                /// empty when no bytes are available for reading at this time. The
+                /// pollable given by `subscribe` will be ready when more bytes are
+                /// available.
+                ///
+                /// This function fails with a `stream-error` when the operation
+                /// encounters an error, giving `last-operation-failed`, or when the
+                /// stream is closed, giving `closed`.
+                ///
+                /// When the caller gives a `len` of 0, it represents a request to
+                /// read 0 bytes. If the stream is still open, this call should
+                /// succeed and return an empty list, or otherwise fail with `closed`.
+                ///
+                /// The `len` parameter is a `u64`, which could represent a list of u8 which
+                /// is not possible to allocate in wasm32, or not desirable to allocate as
+                /// as a return value by the callee. The callee may return a list of bytes
+                /// less than `len` in size while more bytes are available for reading.
                 pub fn read(&self, len: u64) -> Result<_rt::Vec<u8>, StreamError> {
                     unsafe {
                         #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
@@ -6856,6 +9020,8 @@ pub mod wasi {
             }
             impl InputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Read bytes from a stream, after blocking until at least one byte can
+                /// be read. Except for blocking, behavior is identical to `read`.
                 pub fn blocking_read(
                     &self,
                     len: u64,
@@ -6937,6 +9103,10 @@ pub mod wasi {
             }
             impl InputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Skip bytes from a stream. Returns number of bytes skipped.
+                ///
+                /// Behaves identical to `read`, except instead of returning a list
+                /// of bytes, returns the number of bytes consumed from the stream.
                 pub fn skip(&self, len: u64) -> Result<u64, StreamError> {
                     unsafe {
                         #[repr(align(8))]
@@ -6999,6 +9169,8 @@ pub mod wasi {
             }
             impl InputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Skip bytes from a stream, after blocking until at least one byte
+                /// can be skipped. Except for blocking behavior, identical to `skip`.
                 pub fn blocking_skip(&self, len: u64) -> Result<u64, StreamError> {
                     unsafe {
                         #[repr(align(8))]
@@ -7061,6 +9233,12 @@ pub mod wasi {
             }
             impl InputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Create a `pollable` which will resolve once either the specified stream
+                /// has bytes available to read or the other end of the stream has been
+                /// closed.
+                /// The created `pollable` is a child resource of the `input-stream`.
+                /// Implementations may trap if the `input-stream` is dropped before
+                /// all derived `pollable`s created with this function are dropped.
                 pub fn subscribe(&self) -> Pollable {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -7084,6 +9262,15 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Check readiness for writing. This function never blocks.
+                ///
+                /// Returns the number of bytes permitted for the next call to `write`,
+                /// or an error. Calling `write` with more bytes than this function has
+                /// permitted will trap.
+                ///
+                /// When this function returns 0 bytes, the `subscribe` pollable will
+                /// become ready when this function will report at least 1 byte, or an
+                /// error.
                 pub fn check_write(&self) -> Result<u64, StreamError> {
                     unsafe {
                         #[repr(align(8))]
@@ -7144,6 +9331,19 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Perform a write. This function never blocks.
+                ///
+                /// When the destination of a `write` is binary data, the bytes from
+                /// `contents` are written verbatim. When the destination of a `write` is
+                /// known to the implementation to be text, the bytes of `contents` are
+                /// transcoded from UTF-8 into the encoding of the destination and then
+                /// written.
+                ///
+                /// Precondition: check-write gave permit of Ok(n) and contents has a
+                /// length of less than or equal to n. Otherwise, this function will trap.
+                ///
+                /// returns Err(closed) without writing if the stream has closed since
+                /// the last call to check-write provided a permit.
                 pub fn write(&self, contents: &[u8]) -> Result<(), StreamError> {
                     unsafe {
                         #[repr(align(4))]
@@ -7216,6 +9416,30 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Perform a write of up to 4096 bytes, and then flush the stream. Block
+                /// until all of these operations are complete, or an error occurs.
+                ///
+                /// This is a convenience wrapper around the use of `check-write`,
+                /// `subscribe`, `write`, and `flush`, and is implemented with the
+                /// following pseudo-code:
+                ///
+                /// ```text
+                /// let pollable = this.subscribe();
+                /// while !contents.is_empty() {
+                ///     // Wait for the stream to become writable
+                ///     pollable.block();
+                ///     let Ok(n) = this.check-write(); // eliding error handling
+                ///     let len = min(n, contents.len());
+                ///     let (chunk, rest) = contents.split_at(len);
+                ///     this.write(chunk  );            // eliding error handling
+                ///     contents = rest;
+                /// }
+                /// this.flush();
+                /// // Wait for completion of `flush`
+                /// pollable.block();
+                /// // Check for any errors that arose during `flush`
+                /// let _ = this.check-write();         // eliding error handling
+                /// ```
                 pub fn blocking_write_and_flush(
                     &self,
                     contents: &[u8],
@@ -7291,6 +9515,16 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Request to flush buffered output. This function never blocks.
+                ///
+                /// This tells the output-stream that the caller intends any buffered
+                /// output to be flushed. the output which is expected to be flushed
+                /// is all that has been passed to `write` prior to this call.
+                ///
+                /// Upon calling this function, the `output-stream` will not accept any
+                /// writes (`check-write` will return `ok(0)`) until the flush has
+                /// completed. The `subscribe` pollable will become ready when the
+                /// flush has completed and the stream can accept more writes.
                 pub fn flush(&self) -> Result<(), StreamError> {
                     unsafe {
                         #[repr(align(4))]
@@ -7348,6 +9582,8 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Request to flush buffered output, and block until flush completes
+                /// and stream is ready for writing again.
                 pub fn blocking_flush(&self) -> Result<(), StreamError> {
                     unsafe {
                         #[repr(align(4))]
@@ -7405,6 +9641,16 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Create a `pollable` which will resolve once the output-stream
+                /// is ready for more writing, or an error has occured. When this
+                /// pollable is ready, `check-write` will return `ok(n)` with n>0, or an
+                /// error.
+                ///
+                /// If the stream is closed, this pollable is always ready immediately.
+                ///
+                /// The created `pollable` is a child resource of the `output-stream`.
+                /// Implementations may trap if the `output-stream` is dropped before
+                /// all derived `pollable`s created with this function are dropped.
                 pub fn subscribe(&self) -> Pollable {
                     unsafe {
                         #[cfg(target_arch = "wasm32")]
@@ -7428,6 +9674,12 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Write zeroes to a stream.
+                ///
+                /// This should be used precisely like `write` with the exact same
+                /// preconditions (must use check-write first), but instead of
+                /// passing a list of bytes, you simply pass the number of zero-bytes
+                /// that should be written.
                 pub fn write_zeroes(&self, len: u64) -> Result<(), StreamError> {
                     unsafe {
                         #[repr(align(4))]
@@ -7487,6 +9739,30 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Perform a write of up to 4096 zeroes, and then flush the stream.
+                /// Block until all of these operations are complete, or an error
+                /// occurs.
+                ///
+                /// This is a convenience wrapper around the use of `check-write`,
+                /// `subscribe`, `write-zeroes`, and `flush`, and is implemented with
+                /// the following pseudo-code:
+                ///
+                /// ```text
+                /// let pollable = this.subscribe();
+                /// while num_zeroes != 0 {
+                ///     // Wait for the stream to become writable
+                ///     pollable.block();
+                ///     let Ok(n) = this.check-write(); // eliding error handling
+                ///     let len = min(n, num_zeroes);
+                ///     this.write-zeroes(len);         // eliding error handling
+                ///     num_zeroes -= len;
+                /// }
+                /// this.flush();
+                /// // Wait for completion of `flush`
+                /// pollable.block();
+                /// // Check for any errors that arose during `flush`
+                /// let _ = this.check-write();         // eliding error handling
+                /// ```
                 pub fn blocking_write_zeroes_and_flush(
                     &self,
                     len: u64,
@@ -7549,6 +9825,19 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Read from one stream and write to another.
+                ///
+                /// The behavior of splice is equivelant to:
+                /// 1. calling `check-write` on the `output-stream`
+                /// 2. calling `read` on the `input-stream` with the smaller of the
+                /// `check-write` permitted length and the `len` provided to `splice`
+                /// 3. calling `write` on the `output-stream` with that read data.
+                ///
+                /// Any error reported by the call to `check-write`, `read`, or
+                /// `write` ends the splice and reports that error.
+                ///
+                /// This function returns the number of bytes transferred; it may be less
+                /// than `len`.
                 pub fn splice(
                     &self,
                     src: &InputStream,
@@ -7625,6 +9914,11 @@ pub mod wasi {
             }
             impl OutputStream {
                 #[allow(unused_unsafe, clippy::all)]
+                /// Read from one stream and write to another, with blocking.
+                ///
+                /// This is similar to `splice`, except that it blocks until the
+                /// `output-stream` is ready for writing, and the `input-stream`
+                /// is ready for reading, before performing the `splice`.
                 pub fn blocking_splice(
                     &self,
                     src: &InputStream,
@@ -7697,6 +9991,114 @@ pub mod wasi {
                         };
                         result7
                     }
+                }
+            }
+        }
+    }
+    pub mod logging {
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod logging {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            /// Levels are ordered such that a level is "more verbose" if it is
+            /// numerically smaller.
+            #[repr(u8)]
+            #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+            pub enum Level {
+                /// Describes messages about the values of variables and the flow of
+                /// control within a program.
+                Trace,
+                /// Describes messages likely to be of interest to someone debugging a
+                /// program.
+                Debug,
+                /// Describes messages likely to be of interest to someone monitoring a
+                /// program.
+                Info,
+                /// Describes messages about hazardous situations.
+                Warn,
+                /// Describes messages about serious errors.
+                Error,
+                /// Describes messages about fatal errors.
+                Critical,
+            }
+            impl ::core::fmt::Debug for Level {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    match self {
+                        Level::Trace => f.debug_tuple("Level::Trace").finish(),
+                        Level::Debug => f.debug_tuple("Level::Debug").finish(),
+                        Level::Info => f.debug_tuple("Level::Info").finish(),
+                        Level::Warn => f.debug_tuple("Level::Warn").finish(),
+                        Level::Error => f.debug_tuple("Level::Error").finish(),
+                        Level::Critical => f.debug_tuple("Level::Critical").finish(),
+                    }
+                }
+            }
+            impl Level {
+                #[doc(hidden)]
+                pub unsafe fn _lift(val: u8) -> Level {
+                    if !cfg!(debug_assertions) {
+                        return ::core::mem::transmute(val);
+                    }
+                    match val {
+                        0 => Level::Trace,
+                        1 => Level::Debug,
+                        2 => Level::Info,
+                        3 => Level::Warn,
+                        4 => Level::Error,
+                        5 => Level::Critical,
+                        _ => panic!("invalid enum discriminant"),
+                    }
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Emit a log message.
+            ///
+            /// A log message has a `level` describing what kind of message is being
+            /// sent, a context string that's a field of the message, and a message
+            /// string containing the text to log.
+            pub fn log(level: Level, context: &str, message: &str) -> () {
+                unsafe {
+                    let vec0 = context;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let vec1 = message;
+                    let ptr1 = vec1.as_ptr().cast::<u8>();
+                    let len1 = vec1.len();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:logging/logging@0.1.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "log"]
+                        fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                        );
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(
+                        _: i32,
+                        _: *mut u8,
+                        _: usize,
+                        _: *mut u8,
+                        _: usize,
+                    ) {
+                        unreachable!()
+                    }
+                    unsafe {
+                        wit_import2(
+                            level.clone() as i32,
+                            ptr0.cast_mut(),
+                            len0,
+                            ptr1.cast_mut(),
+                            len1,
+                        )
+                    };
                 }
             }
         }
@@ -8553,7 +10955,6 @@ mod _rt {
             }
         }
     }
-    pub use alloc_crate::alloc;
     pub unsafe fn bool_lift(val: u8) -> bool {
         if cfg!(debug_assertions) {
             match val {
@@ -8565,6 +10966,7 @@ mod _rt {
             val != 0
         }
     }
+    pub use alloc_crate::alloc;
     pub fn as_i64<T: AsI64>(t: T) -> i64 {
         t.as_i64()
     }
@@ -8689,150 +11091,202 @@ pub(crate) use __export_app_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7051] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x916\x01A\x02\x01A\x1d\
-\x01B\x0a\x01o\x02ss\x01p\0\x01@\0\0\x01\x04\0\x0fget-environment\x01\x02\x01ps\x01\
-@\0\0\x03\x04\0\x0dget-arguments\x01\x04\x01ks\x01@\0\0\x05\x04\0\x0binitial-cwd\
-\x01\x06\x03\0\x1awasi:cli/environment@0.2.0\x05\0\x01B\x15\x01p}\x01q\x0d\x05in\
-t32\x01z\0\x05int64\x01x\0\x06uint32\x01y\0\x06uint64\x01w\0\x05float\x01u\0\x06\
-double\x01u\0\x03str\x01s\0\x07boolean\x01\x7f\0\x04date\x01s\0\x04time\x01s\0\x09\
-timestamp\x01s\0\x06binary\x01\0\0\x04null\0\0\x04\0\x09data-type\x03\0\x01\x01r\
-\x02\x0afield-names\x05value\x02\x04\0\x03row\x03\0\x03\x04\0\x09statement\x03\x01\
-\x04\0\x05error\x03\x01\x04\0\x0aconnection\x03\x01\x01ps\x01i\x05\x01i\x06\x01j\
-\x01\x09\x01\x0a\x01@\x02\x05querys\x06params\x08\0\x0b\x04\0\x19[static]stateme\
-nt.prepare\x01\x0c\x01h\x06\x01@\x01\x04self\x0d\0s\x04\0\x13[method]error.trace\
-\x01\x0e\x01i\x07\x01j\x01\x0f\x01\x0a\x01@\x01\x04names\0\x10\x04\0\x17[static]\
-connection.open\x01\x11\x03\0\x1awasi:sql/types@0.2.0-draft\x05\x01\x02\x03\0\x01\
-\x09statement\x02\x03\0\x01\x03row\x02\x03\0\x01\x05error\x02\x03\0\x01\x0aconne\
-ction\x01B\x12\x02\x03\x02\x01\x02\x04\0\x09statement\x03\0\0\x02\x03\x02\x01\x03\
-\x04\0\x03row\x03\0\x02\x02\x03\x02\x01\x04\x04\0\x05error\x03\0\x04\x02\x03\x02\
-\x01\x05\x04\0\x0aconnection\x03\0\x06\x01h\x07\x01h\x01\x01p\x03\x01i\x05\x01j\x01\
-\x0a\x01\x0b\x01@\x02\x01c\x08\x01q\x09\0\x0c\x04\0\x05query\x01\x0d\x01j\x01y\x01\
-\x0b\x01@\x02\x01c\x08\x01q\x09\0\x0e\x04\0\x04exec\x01\x0f\x03\0\x1ewasi:sql/re\
-adwrite@0.2.0-draft\x05\x06\x01B\x0a\x04\0\x08pollable\x03\x01\x01h\0\x01@\x01\x04\
-self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\x01@\x01\x04self\x01\x01\0\
-\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\x01py\x01@\x01\x02in\x04\0\x05\
-\x04\0\x04poll\x01\x06\x03\0\x12wasi:io/poll@0.2.0\x05\x07\x02\x03\0\x03\x08poll\
-able\x01B\x0f\x02\x03\x02\x01\x08\x04\0\x08pollable\x03\0\0\x01w\x04\0\x07instan\
-t\x03\0\x02\x01w\x04\0\x08duration\x03\0\x04\x01@\0\0\x03\x04\0\x03now\x01\x06\x01\
-@\0\0\x05\x04\0\x0aresolution\x01\x07\x01i\x01\x01@\x01\x04when\x03\0\x08\x04\0\x11\
-subscribe-instant\x01\x09\x01@\x01\x04when\x05\0\x08\x04\0\x12subscribe-duration\
-\x01\x0a\x03\0!wasi:clocks/monotonic-clock@0.2.0\x05\x09\x01B\x04\x04\0\x05error\
-\x03\x01\x01h\0\x01@\x01\x04self\x01\0s\x04\0\x1d[method]error.to-debug-string\x01\
-\x02\x03\0\x13wasi:io/error@0.2.0\x05\x0a\x02\x03\0\x05\x05error\x01B(\x02\x03\x02\
-\x01\x0b\x04\0\x05error\x03\0\0\x02\x03\x02\x01\x08\x04\0\x08pollable\x03\0\x02\x01\
-i\x01\x01q\x02\x15last-operation-failed\x01\x04\0\x06closed\0\0\x04\0\x0cstream-\
-error\x03\0\x05\x04\0\x0cinput-stream\x03\x01\x04\0\x0doutput-stream\x03\x01\x01\
-h\x07\x01p}\x01j\x01\x0a\x01\x06\x01@\x02\x04self\x09\x03lenw\0\x0b\x04\0\x19[me\
-thod]input-stream.read\x01\x0c\x04\0\"[method]input-stream.blocking-read\x01\x0c\
-\x01j\x01w\x01\x06\x01@\x02\x04self\x09\x03lenw\0\x0d\x04\0\x19[method]input-str\
-eam.skip\x01\x0e\x04\0\"[method]input-stream.blocking-skip\x01\x0e\x01i\x03\x01@\
-\x01\x04self\x09\0\x0f\x04\0\x1e[method]input-stream.subscribe\x01\x10\x01h\x08\x01\
-@\x01\x04self\x11\0\x0d\x04\0![method]output-stream.check-write\x01\x12\x01j\0\x01\
-\x06\x01@\x02\x04self\x11\x08contents\x0a\0\x13\x04\0\x1b[method]output-stream.w\
-rite\x01\x14\x04\0.[method]output-stream.blocking-write-and-flush\x01\x14\x01@\x01\
-\x04self\x11\0\x13\x04\0\x1b[method]output-stream.flush\x01\x15\x04\0$[method]ou\
-tput-stream.blocking-flush\x01\x15\x01@\x01\x04self\x11\0\x0f\x04\0\x1f[method]o\
-utput-stream.subscribe\x01\x16\x01@\x02\x04self\x11\x03lenw\0\x13\x04\0\"[method\
-]output-stream.write-zeroes\x01\x17\x04\05[method]output-stream.blocking-write-z\
-eroes-and-flush\x01\x17\x01@\x03\x04self\x11\x03src\x09\x03lenw\0\x0d\x04\0\x1c[\
-method]output-stream.splice\x01\x18\x04\0%[method]output-stream.blocking-splice\x01\
-\x18\x03\0\x15wasi:io/streams@0.2.0\x05\x0c\x02\x03\0\x04\x08duration\x02\x03\0\x06\
-\x0cinput-stream\x02\x03\0\x06\x0doutput-stream\x01B\xc0\x01\x02\x03\x02\x01\x0d\
-\x04\0\x08duration\x03\0\0\x02\x03\x02\x01\x0e\x04\0\x0cinput-stream\x03\0\x02\x02\
-\x03\x02\x01\x0f\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\x01\x0b\x04\0\x08i\
-o-error\x03\0\x06\x02\x03\x02\x01\x08\x04\0\x08pollable\x03\0\x08\x01q\x0a\x03ge\
-t\0\0\x04head\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07connect\0\0\x07options\
-\0\0\x05trace\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06method\x03\0\x0a\x01q\x03\
-\x04HTTP\0\0\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\0\x0c\x01ks\x01k{\x01\
-r\x02\x05rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-payload\x03\0\x10\x01k}\x01\
-r\x02\x08alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-alert-received-payload\x03\
-\0\x13\x01ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\x04\0\x12field-size-pa\
-yload\x03\0\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09DNS-error\x01\x11\0\x15\
-destination-not-found\0\0\x17destination-unavailable\0\0\x19destination-IP-prohi\
-bited\0\0\x19destination-IP-unroutable\0\0\x12connection-refused\0\0\x15connecti\
-on-terminated\0\0\x12connection-timeout\0\0\x17connection-read-timeout\0\0\x18co\
-nnection-write-timeout\0\0\x18connection-limit-reached\0\0\x12TLS-protocol-error\
-\0\0\x15TLS-certificate-error\0\0\x12TLS-alert-received\x01\x14\0\x13HTTP-reques\
-t-denied\0\0\x1cHTTP-request-length-required\0\0\x16HTTP-request-body-size\x01\x18\
-\0\x1bHTTP-request-method-invalid\0\0\x18HTTP-request-URI-invalid\0\0\x19HTTP-re\
-quest-URI-too-long\0\0\x20HTTP-request-header-section-size\x01\x15\0\x18HTTP-req\
-uest-header-size\x01\x19\0!HTTP-request-trailer-section-size\x01\x15\0\x19HTTP-r\
-equest-trailer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HTTP-response-head\
-er-section-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\x17HTTP-respons\
-e-body-size\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\0\x1aHTTP-resp\
-onse-trailer-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\0\x1cHTTP-r\
-esponse-content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTTP-upgrade-fa\
-iled\0\0\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configuration-error\0\
-\0\x0einternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\x0einvalid\
--syntax\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\0\x1c\x01\
-s\x04\0\x09field-key\x03\0\x1e\x01p}\x04\0\x0bfield-value\x03\0\x20\x04\0\x06fie\
-lds\x03\x01\x04\0\x07headers\x03\0\"\x04\0\x08trailers\x03\0\"\x04\0\x10incoming\
--request\x03\x01\x04\0\x10outgoing-request\x03\x01\x04\0\x0frequest-options\x03\x01\
-\x04\0\x11response-outparam\x03\x01\x01{\x04\0\x0bstatus-code\x03\0)\x04\0\x11in\
-coming-response\x03\x01\x04\0\x0dincoming-body\x03\x01\x04\0\x0ffuture-trailers\x03\
-\x01\x04\0\x11outgoing-response\x03\x01\x04\0\x0doutgoing-body\x03\x01\x04\0\x18\
-future-incoming-response\x03\x01\x01i\"\x01@\0\01\x04\0\x13[constructor]fields\x01\
-2\x01o\x02\x1f!\x01p3\x01j\x011\x01\x1d\x01@\x01\x07entries4\05\x04\0\x18[static\
-]fields.from-list\x016\x01h\"\x01p!\x01@\x02\x04self7\x04name\x1f\08\x04\0\x12[m\
-ethod]fields.get\x019\x01@\x02\x04self7\x04name\x1f\0\x7f\x04\0\x12[method]field\
-s.has\x01:\x01j\0\x01\x1d\x01@\x03\x04self7\x04name\x1f\x05value8\0;\x04\0\x12[m\
-ethod]fields.set\x01<\x01@\x02\x04self7\x04name\x1f\0;\x04\0\x15[method]fields.d\
-elete\x01=\x01@\x03\x04self7\x04name\x1f\x05value!\0;\x04\0\x15[method]fields.ap\
-pend\x01>\x01@\x01\x04self7\04\x04\0\x16[method]fields.entries\x01?\x01@\x01\x04\
-self7\01\x04\0\x14[method]fields.clone\x01@\x01h%\x01@\x01\x04self\xc1\0\0\x0b\x04\
-\0\x1f[method]incoming-request.method\x01B\x01@\x01\x04self\xc1\0\0\x0e\x04\0([m\
-ethod]incoming-request.path-with-query\x01C\x01k\x0d\x01@\x01\x04self\xc1\0\0\xc4\
-\0\x04\0\x1f[method]incoming-request.scheme\x01E\x04\0\"[method]incoming-request\
-.authority\x01C\x01i#\x01@\x01\x04self\xc1\0\0\xc6\0\x04\0\x20[method]incoming-r\
-equest.headers\x01G\x01i,\x01j\x01\xc8\0\0\x01@\x01\x04self\xc1\0\0\xc9\0\x04\0\x20\
-[method]incoming-request.consume\x01J\x01i&\x01@\x01\x07headers\xc6\0\0\xcb\0\x04\
-\0\x1d[constructor]outgoing-request\x01L\x01h&\x01i/\x01j\x01\xce\0\0\x01@\x01\x04\
-self\xcd\0\0\xcf\0\x04\0\x1d[method]outgoing-request.body\x01P\x01@\x01\x04self\xcd\
-\0\0\x0b\x04\0\x1f[method]outgoing-request.method\x01Q\x01j\0\0\x01@\x02\x04self\
-\xcd\0\x06method\x0b\0\xd2\0\x04\0#[method]outgoing-request.set-method\x01S\x01@\
-\x01\x04self\xcd\0\0\x0e\x04\0([method]outgoing-request.path-with-query\x01T\x01\
-@\x02\x04self\xcd\0\x0fpath-with-query\x0e\0\xd2\0\x04\0,[method]outgoing-reques\
-t.set-path-with-query\x01U\x01@\x01\x04self\xcd\0\0\xc4\0\x04\0\x1f[method]outgo\
-ing-request.scheme\x01V\x01@\x02\x04self\xcd\0\x06scheme\xc4\0\0\xd2\0\x04\0#[me\
-thod]outgoing-request.set-scheme\x01W\x04\0\"[method]outgoing-request.authority\x01\
-T\x01@\x02\x04self\xcd\0\x09authority\x0e\0\xd2\0\x04\0&[method]outgoing-request\
-.set-authority\x01X\x01@\x01\x04self\xcd\0\0\xc6\0\x04\0\x20[method]outgoing-req\
-uest.headers\x01Y\x01i'\x01@\0\0\xda\0\x04\0\x1c[constructor]request-options\x01\
-[\x01h'\x01k\x01\x01@\x01\x04self\xdc\0\0\xdd\0\x04\0'[method]request-options.co\
-nnect-timeout\x01^\x01@\x02\x04self\xdc\0\x08duration\xdd\0\0\xd2\0\x04\0+[metho\
-d]request-options.set-connect-timeout\x01_\x04\0*[method]request-options.first-b\
-yte-timeout\x01^\x04\0.[method]request-options.set-first-byte-timeout\x01_\x04\0\
--[method]request-options.between-bytes-timeout\x01^\x04\01[method]request-option\
-s.set-between-bytes-timeout\x01_\x01i(\x01i.\x01j\x01\xe1\0\x01\x1b\x01@\x02\x05\
-param\xe0\0\x08response\xe2\0\x01\0\x04\0\x1d[static]response-outparam.set\x01c\x01\
-h+\x01@\x01\x04self\xe4\0\0*\x04\0\x20[method]incoming-response.status\x01e\x01@\
-\x01\x04self\xe4\0\0\xc6\0\x04\0![method]incoming-response.headers\x01f\x01@\x01\
-\x04self\xe4\0\0\xc9\0\x04\0![method]incoming-response.consume\x01g\x01h,\x01i\x03\
-\x01j\x01\xe9\0\0\x01@\x01\x04self\xe8\0\0\xea\0\x04\0\x1c[method]incoming-body.\
-stream\x01k\x01i-\x01@\x01\x04this\xc8\0\0\xec\0\x04\0\x1c[static]incoming-body.\
-finish\x01m\x01h-\x01i\x09\x01@\x01\x04self\xee\0\0\xef\0\x04\0![method]future-t\
-railers.subscribe\x01p\x01i$\x01k\xf1\0\x01j\x01\xf2\0\x01\x1b\x01j\x01\xf3\0\0\x01\
-k\xf4\0\x01@\x01\x04self\xee\0\0\xf5\0\x04\0\x1b[method]future-trailers.get\x01v\
-\x01@\x01\x07headers\xc6\0\0\xe1\0\x04\0\x1e[constructor]outgoing-response\x01w\x01\
-h.\x01@\x01\x04self\xf8\0\0*\x04\0%[method]outgoing-response.status-code\x01y\x01\
-@\x02\x04self\xf8\0\x0bstatus-code*\0\xd2\0\x04\0)[method]outgoing-response.set-\
-status-code\x01z\x01@\x01\x04self\xf8\0\0\xc6\0\x04\0![method]outgoing-response.\
-headers\x01{\x01@\x01\x04self\xf8\0\0\xcf\0\x04\0\x1e[method]outgoing-response.b\
-ody\x01|\x01h/\x01i\x05\x01j\x01\xfe\0\0\x01@\x01\x04self\xfd\0\0\xff\0\x04\0\x1b\
-[method]outgoing-body.write\x01\x80\x01\x01j\0\x01\x1b\x01@\x02\x04this\xce\0\x08\
-trailers\xf2\0\0\x81\x01\x04\0\x1c[static]outgoing-body.finish\x01\x82\x01\x01h0\
-\x01@\x01\x04self\x83\x01\0\xef\0\x04\0*[method]future-incoming-response.subscri\
-be\x01\x84\x01\x01i+\x01j\x01\x85\x01\x01\x1b\x01j\x01\x86\x01\0\x01k\x87\x01\x01\
-@\x01\x04self\x83\x01\0\x88\x01\x04\0$[method]future-incoming-response.get\x01\x89\
-\x01\x01h\x07\x01k\x1b\x01@\x01\x03err\x8a\x01\0\x8b\x01\x04\0\x0fhttp-error-cod\
-e\x01\x8c\x01\x03\0\x15wasi:http/types@0.2.0\x05\x10\x02\x03\0\x07\x10incoming-r\
-equest\x02\x03\0\x07\x11response-outparam\x01B\x08\x02\x03\x02\x01\x11\x04\0\x10\
-incoming-request\x03\0\0\x02\x03\x02\x01\x12\x04\0\x11response-outparam\x03\0\x02\
-\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\x06ha\
-ndle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.0\x05\x13\x04\0\x13pushit:h\
-ello-fn/app\x04\0\x0b\x09\x01\0\x03app\x03\0\0\0G\x09producers\x01\x0cprocessed-\
-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 9375] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xa5H\x01A\x02\x01A.\x01\
+B\x0a\x01o\x02ss\x01p\0\x01@\0\0\x01\x04\0\x0fget-environment\x01\x02\x01ps\x01@\
+\0\0\x03\x04\0\x0dget-arguments\x01\x04\x01ks\x01@\0\0\x05\x04\0\x0binitial-cwd\x01\
+\x06\x03\0\x1awasi:cli/environment@0.2.0\x05\0\x01B\x04\x04\0\x05error\x03\x01\x01\
+h\0\x01@\x01\x04self\x01\0s\x04\0\x1d[method]error.to-debug-string\x01\x02\x03\0\
+\x13wasi:io/error@0.2.0\x05\x01\x01B\x0a\x04\0\x08pollable\x03\x01\x01h\0\x01@\x01\
+\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\x01@\x01\x04self\x01\x01\
+\0\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\x01py\x01@\x01\x02in\x04\0\x05\
+\x04\0\x04poll\x01\x06\x03\0\x12wasi:io/poll@0.2.0\x05\x02\x02\x03\0\x01\x05erro\
+r\x02\x03\0\x02\x08pollable\x01B(\x02\x03\x02\x01\x03\x04\0\x05error\x03\0\0\x02\
+\x03\x02\x01\x04\x04\0\x08pollable\x03\0\x02\x01i\x01\x01q\x02\x15last-operation\
+-failed\x01\x04\0\x06closed\0\0\x04\0\x0cstream-error\x03\0\x05\x04\0\x0cinput-s\
+tream\x03\x01\x04\0\x0doutput-stream\x03\x01\x01h\x07\x01p}\x01j\x01\x0a\x01\x06\
+\x01@\x02\x04self\x09\x03lenw\0\x0b\x04\0\x19[method]input-stream.read\x01\x0c\x04\
+\0\"[method]input-stream.blocking-read\x01\x0c\x01j\x01w\x01\x06\x01@\x02\x04sel\
+f\x09\x03lenw\0\x0d\x04\0\x19[method]input-stream.skip\x01\x0e\x04\0\"[method]in\
+put-stream.blocking-skip\x01\x0e\x01i\x03\x01@\x01\x04self\x09\0\x0f\x04\0\x1e[m\
+ethod]input-stream.subscribe\x01\x10\x01h\x08\x01@\x01\x04self\x11\0\x0d\x04\0![\
+method]output-stream.check-write\x01\x12\x01j\0\x01\x06\x01@\x02\x04self\x11\x08\
+contents\x0a\0\x13\x04\0\x1b[method]output-stream.write\x01\x14\x04\0.[method]ou\
+tput-stream.blocking-write-and-flush\x01\x14\x01@\x01\x04self\x11\0\x13\x04\0\x1b\
+[method]output-stream.flush\x01\x15\x04\0$[method]output-stream.blocking-flush\x01\
+\x15\x01@\x01\x04self\x11\0\x0f\x04\0\x1f[method]output-stream.subscribe\x01\x16\
+\x01@\x02\x04self\x11\x03lenw\0\x13\x04\0\"[method]output-stream.write-zeroes\x01\
+\x17\x04\05[method]output-stream.blocking-write-zeroes-and-flush\x01\x17\x01@\x03\
+\x04self\x11\x03src\x09\x03lenw\0\x0d\x04\0\x1c[method]output-stream.splice\x01\x18\
+\x04\0%[method]output-stream.blocking-splice\x01\x18\x03\0\x15wasi:io/streams@0.\
+2.0\x05\x05\x01B\x15\x01p}\x01q\x0d\x05int32\x01z\0\x05int64\x01x\0\x06uint32\x01\
+y\0\x06uint64\x01w\0\x05float\x01u\0\x06double\x01u\0\x03str\x01s\0\x07boolean\x01\
+\x7f\0\x04date\x01s\0\x04time\x01s\0\x09timestamp\x01s\0\x06binary\x01\0\0\x04nu\
+ll\0\0\x04\0\x09data-type\x03\0\x01\x01r\x02\x0afield-names\x05value\x02\x04\0\x03\
+row\x03\0\x03\x04\0\x09statement\x03\x01\x04\0\x05error\x03\x01\x04\0\x0aconnect\
+ion\x03\x01\x01ps\x01i\x05\x01i\x06\x01j\x01\x09\x01\x0a\x01@\x02\x05querys\x06p\
+arams\x08\0\x0b\x04\0\x19[static]statement.prepare\x01\x0c\x01h\x06\x01@\x01\x04\
+self\x0d\0s\x04\0\x13[method]error.trace\x01\x0e\x01i\x07\x01j\x01\x0f\x01\x0a\x01\
+@\x01\x04names\0\x10\x04\0\x17[static]connection.open\x01\x11\x03\0\x1awasi:sql/\
+types@0.2.0-draft\x05\x06\x02\x03\0\x04\x09statement\x02\x03\0\x04\x03row\x02\x03\
+\0\x04\x05error\x02\x03\0\x04\x0aconnection\x01B\x12\x02\x03\x02\x01\x07\x04\0\x09\
+statement\x03\0\0\x02\x03\x02\x01\x08\x04\0\x03row\x03\0\x02\x02\x03\x02\x01\x09\
+\x04\0\x05error\x03\0\x04\x02\x03\x02\x01\x0a\x04\0\x0aconnection\x03\0\x06\x01h\
+\x07\x01h\x01\x01p\x03\x01i\x05\x01j\x01\x0a\x01\x0b\x01@\x02\x01c\x08\x01q\x09\0\
+\x0c\x04\0\x05query\x01\x0d\x01j\x01y\x01\x0b\x01@\x02\x01c\x08\x01q\x09\0\x0e\x04\
+\0\x04exec\x01\x0f\x03\0\x1ewasi:sql/readwrite@0.2.0-draft\x05\x0b\x01B\x04\x01m\
+\x06\x05trace\x05debug\x04info\x04warn\x05error\x08critical\x04\0\x05level\x03\0\
+\0\x01@\x03\x05level\x01\x07contexts\x07messages\x01\0\x04\0\x03log\x01\x02\x03\0\
+\x20wasi:logging/logging@0.1.0-draft\x05\x0c\x02\x03\0\x03\x0cinput-stream\x02\x03\
+\0\x03\x0doutput-stream\x01B/\x02\x03\x02\x01\x0d\x04\0\x0cinput-stream\x03\0\0\x02\
+\x03\x02\x01\x0e\x04\0\x0doutput-stream\x03\0\x02\x01s\x04\0\x0econtainer-name\x03\
+\0\x04\x01s\x04\0\x0bobject-name\x03\0\x06\x01w\x04\0\x09timestamp\x03\0\x08\x01\
+w\x04\0\x0bobject-size\x03\0\x0a\x01s\x04\0\x05error\x03\0\x0c\x01r\x02\x04name\x05\
+\x0acreated-at\x09\x04\0\x12container-metadata\x03\0\x0e\x01r\x04\x04name\x07\x09\
+container\x05\x0acreated-at\x09\x04size\x0b\x04\0\x0fobject-metadata\x03\0\x10\x01\
+r\x02\x09container\x05\x06object\x07\x04\0\x09object-id\x03\0\x12\x04\0\x0eoutgo\
+ing-value\x03\x01\x04\0\x0eincoming-value\x03\x01\x01p}\x04\0\x18incoming-value-\
+sync-body\x03\0\x16\x04\0\x19incoming-value-async-body\x03\0\x01\x01i\x14\x01@\0\
+\0\x19\x04\0)[static]outgoing-value.new-outgoing-value\x01\x1a\x01h\x14\x01i\x03\
+\x01j\x01\x1c\0\x01@\x01\x04self\x1b\0\x1d\x04\00[method]outgoing-value.outgoing\
+-value-write-body\x01\x1e\x01j\0\x01\x0d\x01@\x01\x04this\x19\0\x1f\x04\0\x1d[st\
+atic]outgoing-value.finish\x01\x20\x01i\x15\x01j\x01\x17\x01\x0d\x01@\x01\x04thi\
+s!\0\"\x04\02[static]incoming-value.incoming-value-consume-sync\x01#\x01i\x18\x01\
+j\x01$\x01\x0d\x01@\x01\x04this!\0%\x04\03[static]incoming-value.incoming-value-\
+consume-async\x01&\x01h\x15\x01@\x01\x04self'\0w\x04\0\x1b[method]incoming-value\
+.size\x01(\x03\0\x20wasi:blobstore/types@0.2.0-draft\x05\x0f\x02\x03\0\x07\x12co\
+ntainer-metadata\x02\x03\0\x07\x05error\x02\x03\0\x07\x0eincoming-value\x02\x03\0\
+\x07\x0fobject-metadata\x02\x03\0\x07\x0bobject-name\x02\x03\0\x07\x0eoutgoing-v\
+alue\x01B7\x02\x03\x02\x01\x10\x04\0\x12container-metadata\x03\0\0\x02\x03\x02\x01\
+\x11\x04\0\x05error\x03\0\x02\x02\x03\x02\x01\x12\x04\0\x0eincoming-value\x03\0\x04\
+\x02\x03\x02\x01\x13\x04\0\x0fobject-metadata\x03\0\x06\x02\x03\x02\x01\x14\x04\0\
+\x0bobject-name\x03\0\x08\x02\x03\x02\x01\x15\x04\0\x0eoutgoing-value\x03\0\x0a\x04\
+\0\x09container\x03\x01\x04\0\x13stream-object-names\x03\x01\x01h\x0c\x01j\x01s\x01\
+\x03\x01@\x01\x04self\x0e\0\x0f\x04\0\x16[method]container.name\x01\x10\x01j\x01\
+\x01\x01\x03\x01@\x01\x04self\x0e\0\x11\x04\0\x16[method]container.info\x01\x12\x01\
+i\x05\x01j\x01\x13\x01\x03\x01@\x04\x04self\x0e\x04name\x09\x05startw\x03endw\0\x14\
+\x04\0\x1a[method]container.get-data\x01\x15\x01h\x0b\x01j\0\x01\x03\x01@\x03\x04\
+self\x0e\x04name\x09\x04data\x16\0\x17\x04\0\x1c[method]container.write-data\x01\
+\x18\x01i\x0d\x01j\x01\x19\x01\x03\x01@\x01\x04self\x0e\0\x1a\x04\0\x1e[method]c\
+ontainer.list-objects\x01\x1b\x01@\x02\x04self\x0e\x04name\x09\0\x17\x04\0\x1f[m\
+ethod]container.delete-object\x01\x1c\x01p\x09\x01@\x02\x04self\x0e\x05names\x1d\
+\0\x17\x04\0\x20[method]container.delete-objects\x01\x1e\x01j\x01\x7f\x01\x03\x01\
+@\x02\x04self\x0e\x04name\x09\0\x1f\x04\0\x1c[method]container.has-object\x01\x20\
+\x01j\x01\x07\x01\x03\x01@\x02\x04self\x0e\x04name\x09\0!\x04\0\x1d[method]conta\
+iner.object-info\x01\"\x01@\x01\x04self\x0e\0\x17\x04\0\x17[method]container.cle\
+ar\x01#\x01h\x0d\x01o\x02\x1d\x7f\x01j\x01%\x01\x03\x01@\x02\x04self$\x03lenw\0&\
+\x04\04[method]stream-object-names.read-stream-object-names\x01'\x01o\x02w\x7f\x01\
+j\x01(\x01\x03\x01@\x02\x04self$\x03numw\0)\x04\04[method]stream-object-names.sk\
+ip-stream-object-names\x01*\x03\0$wasi:blobstore/container@0.2.0-draft\x05\x16\x02\
+\x03\0\x08\x09container\x02\x03\0\x07\x0econtainer-name\x02\x03\0\x07\x09object-\
+id\x01B\x16\x02\x03\x02\x01\x17\x04\0\x09container\x03\0\0\x02\x03\x02\x01\x11\x04\
+\0\x05error\x03\0\x02\x02\x03\x02\x01\x18\x04\0\x0econtainer-name\x03\0\x04\x02\x03\
+\x02\x01\x19\x04\0\x09object-id\x03\0\x06\x01i\x01\x01j\x01\x08\x01\x03\x01@\x01\
+\x04name\x05\0\x09\x04\0\x10create-container\x01\x0a\x04\0\x0dget-container\x01\x0a\
+\x01j\0\x01\x03\x01@\x01\x04name\x05\0\x0b\x04\0\x10delete-container\x01\x0c\x01\
+j\x01\x7f\x01\x03\x01@\x01\x04name\x05\0\x0d\x04\0\x10container-exists\x01\x0e\x01\
+@\x02\x03src\x07\x04dest\x07\0\x0b\x04\0\x0bcopy-object\x01\x0f\x04\0\x0bmove-ob\
+ject\x01\x0f\x03\0$wasi:blobstore/blobstore@0.2.0-draft\x05\x1a\x01B\x0f\x02\x03\
+\x02\x01\x04\x04\0\x08pollable\x03\0\0\x01w\x04\0\x07instant\x03\0\x02\x01w\x04\0\
+\x08duration\x03\0\x04\x01@\0\0\x03\x04\0\x03now\x01\x06\x01@\0\0\x05\x04\0\x0ar\
+esolution\x01\x07\x01i\x01\x01@\x01\x04when\x03\0\x08\x04\0\x11subscribe-instant\
+\x01\x09\x01@\x01\x04when\x05\0\x08\x04\0\x12subscribe-duration\x01\x0a\x03\0!wa\
+si:clocks/monotonic-clock@0.2.0\x05\x1b\x02\x03\0\x0a\x08duration\x01B\xc0\x01\x02\
+\x03\x02\x01\x1c\x04\0\x08duration\x03\0\0\x02\x03\x02\x01\x0d\x04\0\x0cinput-st\
+ream\x03\0\x02\x02\x03\x02\x01\x0e\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\x01\
+\x03\x04\0\x08io-error\x03\0\x06\x02\x03\x02\x01\x04\x04\0\x08pollable\x03\0\x08\
+\x01q\x0a\x03get\0\0\x04head\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07connect\
+\0\0\x07options\0\0\x05trace\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06method\x03\
+\0\x0a\x01q\x03\x04HTTP\0\0\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\0\x0c\
+\x01ks\x01k{\x01r\x02\x05rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-payload\x03\
+\0\x10\x01k}\x01r\x02\x08alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-alert-re\
+ceived-payload\x03\0\x13\x01ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\x04\0\
+\x12field-size-payload\x03\0\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09DNS-\
+error\x01\x11\0\x15destination-not-found\0\0\x17destination-unavailable\0\0\x19d\
+estination-IP-prohibited\0\0\x19destination-IP-unroutable\0\0\x12connection-refu\
+sed\0\0\x15connection-terminated\0\0\x12connection-timeout\0\0\x17connection-rea\
+d-timeout\0\0\x18connection-write-timeout\0\0\x18connection-limit-reached\0\0\x12\
+TLS-protocol-error\0\0\x15TLS-certificate-error\0\0\x12TLS-alert-received\x01\x14\
+\0\x13HTTP-request-denied\0\0\x1cHTTP-request-length-required\0\0\x16HTTP-reques\
+t-body-size\x01\x18\0\x1bHTTP-request-method-invalid\0\0\x18HTTP-request-URI-inv\
+alid\0\0\x19HTTP-request-URI-too-long\0\0\x20HTTP-request-header-section-size\x01\
+\x15\0\x18HTTP-request-header-size\x01\x19\0!HTTP-request-trailer-section-size\x01\
+\x15\0\x19HTTP-request-trailer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HT\
+TP-response-header-section-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\
+\x17HTTP-response-body-size\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\
+\0\x1aHTTP-response-trailer-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\
+\0\x1cHTTP-response-content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTT\
+P-upgrade-failed\0\0\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configur\
+ation-error\0\0\x0einternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\
+\x0einvalid-syntax\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\
+\0\x1c\x01s\x04\0\x09field-key\x03\0\x1e\x01p}\x04\0\x0bfield-value\x03\0\x20\x04\
+\0\x06fields\x03\x01\x04\0\x07headers\x03\0\"\x04\0\x08trailers\x03\0\"\x04\0\x10\
+incoming-request\x03\x01\x04\0\x10outgoing-request\x03\x01\x04\0\x0frequest-opti\
+ons\x03\x01\x04\0\x11response-outparam\x03\x01\x01{\x04\0\x0bstatus-code\x03\0)\x04\
+\0\x11incoming-response\x03\x01\x04\0\x0dincoming-body\x03\x01\x04\0\x0ffuture-t\
+railers\x03\x01\x04\0\x11outgoing-response\x03\x01\x04\0\x0doutgoing-body\x03\x01\
+\x04\0\x18future-incoming-response\x03\x01\x01i\"\x01@\0\01\x04\0\x13[constructo\
+r]fields\x012\x01o\x02\x1f!\x01p3\x01j\x011\x01\x1d\x01@\x01\x07entries4\05\x04\0\
+\x18[static]fields.from-list\x016\x01h\"\x01p!\x01@\x02\x04self7\x04name\x1f\08\x04\
+\0\x12[method]fields.get\x019\x01@\x02\x04self7\x04name\x1f\0\x7f\x04\0\x12[meth\
+od]fields.has\x01:\x01j\0\x01\x1d\x01@\x03\x04self7\x04name\x1f\x05value8\0;\x04\
+\0\x12[method]fields.set\x01<\x01@\x02\x04self7\x04name\x1f\0;\x04\0\x15[method]\
+fields.delete\x01=\x01@\x03\x04self7\x04name\x1f\x05value!\0;\x04\0\x15[method]f\
+ields.append\x01>\x01@\x01\x04self7\04\x04\0\x16[method]fields.entries\x01?\x01@\
+\x01\x04self7\01\x04\0\x14[method]fields.clone\x01@\x01h%\x01@\x01\x04self\xc1\0\
+\0\x0b\x04\0\x1f[method]incoming-request.method\x01B\x01@\x01\x04self\xc1\0\0\x0e\
+\x04\0([method]incoming-request.path-with-query\x01C\x01k\x0d\x01@\x01\x04self\xc1\
+\0\0\xc4\0\x04\0\x1f[method]incoming-request.scheme\x01E\x04\0\"[method]incoming\
+-request.authority\x01C\x01i#\x01@\x01\x04self\xc1\0\0\xc6\0\x04\0\x20[method]in\
+coming-request.headers\x01G\x01i,\x01j\x01\xc8\0\0\x01@\x01\x04self\xc1\0\0\xc9\0\
+\x04\0\x20[method]incoming-request.consume\x01J\x01i&\x01@\x01\x07headers\xc6\0\0\
+\xcb\0\x04\0\x1d[constructor]outgoing-request\x01L\x01h&\x01i/\x01j\x01\xce\0\0\x01\
+@\x01\x04self\xcd\0\0\xcf\0\x04\0\x1d[method]outgoing-request.body\x01P\x01@\x01\
+\x04self\xcd\0\0\x0b\x04\0\x1f[method]outgoing-request.method\x01Q\x01j\0\0\x01@\
+\x02\x04self\xcd\0\x06method\x0b\0\xd2\0\x04\0#[method]outgoing-request.set-meth\
+od\x01S\x01@\x01\x04self\xcd\0\0\x0e\x04\0([method]outgoing-request.path-with-qu\
+ery\x01T\x01@\x02\x04self\xcd\0\x0fpath-with-query\x0e\0\xd2\0\x04\0,[method]out\
+going-request.set-path-with-query\x01U\x01@\x01\x04self\xcd\0\0\xc4\0\x04\0\x1f[\
+method]outgoing-request.scheme\x01V\x01@\x02\x04self\xcd\0\x06scheme\xc4\0\0\xd2\
+\0\x04\0#[method]outgoing-request.set-scheme\x01W\x04\0\"[method]outgoing-reques\
+t.authority\x01T\x01@\x02\x04self\xcd\0\x09authority\x0e\0\xd2\0\x04\0&[method]o\
+utgoing-request.set-authority\x01X\x01@\x01\x04self\xcd\0\0\xc6\0\x04\0\x20[meth\
+od]outgoing-request.headers\x01Y\x01i'\x01@\0\0\xda\0\x04\0\x1c[constructor]requ\
+est-options\x01[\x01h'\x01k\x01\x01@\x01\x04self\xdc\0\0\xdd\0\x04\0'[method]req\
+uest-options.connect-timeout\x01^\x01@\x02\x04self\xdc\0\x08duration\xdd\0\0\xd2\
+\0\x04\0+[method]request-options.set-connect-timeout\x01_\x04\0*[method]request-\
+options.first-byte-timeout\x01^\x04\0.[method]request-options.set-first-byte-tim\
+eout\x01_\x04\0-[method]request-options.between-bytes-timeout\x01^\x04\01[method\
+]request-options.set-between-bytes-timeout\x01_\x01i(\x01i.\x01j\x01\xe1\0\x01\x1b\
+\x01@\x02\x05param\xe0\0\x08response\xe2\0\x01\0\x04\0\x1d[static]response-outpa\
+ram.set\x01c\x01h+\x01@\x01\x04self\xe4\0\0*\x04\0\x20[method]incoming-response.\
+status\x01e\x01@\x01\x04self\xe4\0\0\xc6\0\x04\0![method]incoming-response.heade\
+rs\x01f\x01@\x01\x04self\xe4\0\0\xc9\0\x04\0![method]incoming-response.consume\x01\
+g\x01h,\x01i\x03\x01j\x01\xe9\0\0\x01@\x01\x04self\xe8\0\0\xea\0\x04\0\x1c[metho\
+d]incoming-body.stream\x01k\x01i-\x01@\x01\x04this\xc8\0\0\xec\0\x04\0\x1c[stati\
+c]incoming-body.finish\x01m\x01h-\x01i\x09\x01@\x01\x04self\xee\0\0\xef\0\x04\0!\
+[method]future-trailers.subscribe\x01p\x01i$\x01k\xf1\0\x01j\x01\xf2\0\x01\x1b\x01\
+j\x01\xf3\0\0\x01k\xf4\0\x01@\x01\x04self\xee\0\0\xf5\0\x04\0\x1b[method]future-\
+trailers.get\x01v\x01@\x01\x07headers\xc6\0\0\xe1\0\x04\0\x1e[constructor]outgoi\
+ng-response\x01w\x01h.\x01@\x01\x04self\xf8\0\0*\x04\0%[method]outgoing-response\
+.status-code\x01y\x01@\x02\x04self\xf8\0\x0bstatus-code*\0\xd2\0\x04\0)[method]o\
+utgoing-response.set-status-code\x01z\x01@\x01\x04self\xf8\0\0\xc6\0\x04\0![meth\
+od]outgoing-response.headers\x01{\x01@\x01\x04self\xf8\0\0\xcf\0\x04\0\x1e[metho\
+d]outgoing-response.body\x01|\x01h/\x01i\x05\x01j\x01\xfe\0\0\x01@\x01\x04self\xfd\
+\0\0\xff\0\x04\0\x1b[method]outgoing-body.write\x01\x80\x01\x01j\0\x01\x1b\x01@\x02\
+\x04this\xce\0\x08trailers\xf2\0\0\x81\x01\x04\0\x1c[static]outgoing-body.finish\
+\x01\x82\x01\x01h0\x01@\x01\x04self\x83\x01\0\xef\0\x04\0*[method]future-incomin\
+g-response.subscribe\x01\x84\x01\x01i+\x01j\x01\x85\x01\x01\x1b\x01j\x01\x86\x01\
+\0\x01k\x87\x01\x01@\x01\x04self\x83\x01\0\x88\x01\x04\0$[method]future-incoming\
+-response.get\x01\x89\x01\x01h\x07\x01k\x1b\x01@\x01\x03err\x8a\x01\0\x8b\x01\x04\
+\0\x0fhttp-error-code\x01\x8c\x01\x03\0\x15wasi:http/types@0.2.0\x05\x1d\x02\x03\
+\0\x0b\x10incoming-request\x02\x03\0\x0b\x11response-outparam\x01B\x08\x02\x03\x02\
+\x01\x1e\x04\0\x10incoming-request\x03\0\0\x02\x03\x02\x01\x1f\x04\0\x11response\
+-outparam\x03\0\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\
+\x01\0\x04\0\x06handle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.0\x05\x20\
+\x04\0\x13pushit:hello-fn/app\x04\0\x0b\x09\x01\0\x03app\x03\0\0\0G\x09producers\
+\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41\
+.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

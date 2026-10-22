@@ -1,0 +1,84 @@
+package wasi:blobstore@0.2.0-draft;
+
+interface types {
+    use wasi:io/streams@0.2.0.{input-stream, output-stream};
+
+    /// A name for a container (aka bucket).
+    type container-name = string;
+    /// A name for an object within a container.
+    type object-name = string;
+    /// A timestamp represented as seconds since the Unix epoch.
+    type timestamp = u64;
+    /// The size of an object in bytes.
+    type object-size = u64;
+    /// Error type — draft carries a plain string instead of a resource.
+    type error = string;
+
+    /// Information about a container.
+    record container-metadata {
+        /// The name of the container.
+        name: container-name,
+        /// The timestamp when the container was created.
+        created-at: timestamp,
+    }
+
+    /// Information about an object.
+    record object-metadata {
+        /// The name of the object.
+        name: object-name,
+        /// The name of the object's container.
+        container: container-name,
+        /// The timestamp when the object was created.
+        created-at: timestamp,
+        /// The size of the object, in bytes.
+        size: object-size,
+    }
+
+    /// An identifier for an object that specifies both the container and the
+    /// object name.
+    record object-id {
+        /// The name of the object's container.
+        container: container-name,
+        /// The name of the object.
+        object: object-name,
+    }
+
+    /// A reference to a value that will be written to a blobstore.
+    ///
+    /// To write a value to a blobstore, create an `outgoing-value` and write to
+    /// the stream returned by `outgoing-value-write-body`, then pass the value
+    /// to `container.write-data`.
+    resource outgoing-value {
+        /// Creates a new `outgoing-value` for writing to the blobstore.
+        new-outgoing-value: static func() -> outgoing-value;
+
+        /// Returns a stream for writing the value's body.
+        outgoing-value-write-body: func() -> result<output-stream>;
+
+        /// Finalizes the write of the `outgoing-value`'s body.
+        ///
+        /// This should be called after writing the body of the `outgoing-value`
+        /// and after calling `write-data`.
+        finish: static func(this: outgoing-value) -> result<_, error>;
+    }
+
+    /// A reference to a value read from a blobstore.
+    resource incoming-value {
+        /// Consumes the value synchronously and returns the contents as a list
+        /// of bytes.
+        incoming-value-consume-sync: static func(this: incoming-value) -> result<incoming-value-sync-body, error>;
+
+        /// Consumes the value asynchronously and returns the contents as an
+        /// `input-stream`.
+        incoming-value-consume-async: static func(this: incoming-value) -> result<incoming-value-async-body, error>;
+
+        /// The size of the value, in bytes.
+        size: func() -> u64;
+    }
+
+    /// A synchronous body — the full contents as a byte list.
+    type incoming-value-sync-body = list<u8>;
+
+    /// An asynchronous body — the contents as an input stream.
+    type incoming-value-async-body = input-stream;
+}
