@@ -35,7 +35,7 @@ curl -H 'Host: myapp.localhost' http://localhost:9100/_fn/hello # функция
 pushit logs myapp
 ```
 
-### Аутентификация на реальной платформе
+### Аутентификация и профили
 
 ```bash
 pushit login    # один раз: браузер → Keycloak → долгоживущий токен (~1 год)
@@ -44,6 +44,16 @@ pushit login    # один раз: браузер → Keycloak → долгож�
 Токен хранится в `~/.config/pushit/token` (0600) и используется автоматически;
 приоритет: `--token` > `PUSHIT_TOKEN` > сохранённый токен > `--dev`.
 Ротация — повторный `pushit login`.
+
+Несколько инстансов — профили (файл `~/.config/pushit/profiles.toml`, 0600):
+
+```bash
+pushit profile add prod --server https://pushit.example.com
+pushit login --profile prod        # флоу аутентификации для этого профиля
+pushit profile use prod            # активировать (все команды идут в него)
+pushit --profile stage list        # одна команда другим профилем, без переключения
+pushit profile list | show stage | remove prod
+```
 
 ### Локальная отладка без контроллера
 

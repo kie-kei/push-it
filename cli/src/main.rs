@@ -9,17 +9,21 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 mod dev;
+mod profiles;
 
 /// Thin client for the PushIt controller API.
 #[derive(Parser)]
 #[command(name = "pushit", version, about = "Deploy and manage PushIt apps")]
 struct Cli {
-    /// Controller base URL.
-    #[arg(long, global = true, env = "PUSHIT_SERVER", default_value = "http://localhost:9100")]
-    server: String,
+    /// Controller base URL (overrides the active profile's server).
+    #[arg(long, global = true, env = "PUSHIT_SERVER")]
+    server: Option<String>,
     /// Bearer token for authenticated API calls.
     #[arg(long, global = true, env = "PUSHIT_TOKEN")]
     token: Option<String>,
+    /// Use this profile's server/token without switching the active one.
+    #[arg(long, global = true, env = "PUSHIT_PROFILE")]
+    profile: Option<String>,
     /// Dev mode: send X-Pushit-Dev: 1 instead of requiring a token.
     #[arg(long, global = true, env = "PUSHIT_DEV")]
     dev: bool,
@@ -32,6 +36,25 @@ struct SkillInstallArgs {
     /// Install into ./.agents/skill/pushit instead of the home directory.
     #[arg(long)]
     project: bool,
+}
+
+#[derive(Subcommand)]
+enum ProfileCmd {
+    /// List profiles (active one marked with *).
+    List,
+    /// Show one profile's settings.
+    Show { name: String },
+    /// Set the active profile.
+    Use { name: String },
+    /// Create a profile.
+    Add {
+        name: String,
+        /// Controller base URL for this instance.
+        #[arg(long)]
+        server: String,
+    },
+    /// Delete a profile.
+    Remove { name: String },
 }
 
 #[derive(Subcommand)]
@@ -55,6 +78,11 @@ enum Cmd {
     },
     /// Authenticate once via browser; the token is stored and reused (~1 year).
     Login,
+    /// Manage connection profiles (per-instance server + token).
+    Profile {
+        #[command(subcommand)]
+        cmd: ProfileCmd,
+    },
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
     Build(BuildArgs),
     /// Run the app on a local standalone runtime (no controller needed).
@@ -147,8 +175,35 @@ struct BuildArgs {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let client = client(&cli)?;
-    let server = cli.server.trim_end_matches('/').to_string();
+    let store = profiles::load();
+
+    // resolution: --profile <name> → explicit target (error if missing);
+    // otherwise the active profile; --server/--token still win per-field.
+    let target = match &cli.profile {
+        Some(name) => Some((name.clone(), store.get(name)?.clone())),
+        None => store
+            .active
+            .as_ref()
+            .and_then(|n| store.get(n).ok().map(|e| (n.clone(), e.clone()))),
+    };
+    let server = cli
+        .server
+        .clone()
+        .or_else(|| target.as_ref().map(|(_, e)| e.server.clone()))
+        .unwrap_or_else(|| "http://localhost:9100".into())
+        .trim_end_matches('/')
+        .to_string();
+    let token = cli
+        .token
+        .clone()
+        .or_else(|| {
+            target
+                .as_ref()
+                .map(|(_, e)| e.token.clone())
+                .filter(|t| !t.is_empty())
+        })
+        .or_else(read_saved_token);
+    let client = client_for(cli.dev, token);
     match cli.cmd {
         Cmd::Skill { cmd } => match cmd {
             None => {
@@ -157,7 +212,11 @@ fn main() -> Result<()> {
             }
             Some(SkillCmd::Install(a)) => skill_install(&a),
         },
-        Cmd::Login => login(&server),
+        Cmd::Login => {
+            let target_profile = cli.profile.clone().or_else(|| store.active.clone());
+            login(&server, target_profile.as_deref())
+        }
+        Cmd::Profile { cmd } => profile_cmd(cmd),
         Cmd::Plan { manifest } => plan_root(
             &server,
             &client,
@@ -196,23 +255,21 @@ fn url(server: &str, path: &str) -> String {
     format!("{server}{path}")
 }
 
-fn client(cli: &Cli) -> Result<Client> {
+fn client_for(dev: bool, token: Option<String>) -> Client {
     let mut headers = HeaderMap::new();
-    // precedence: --token > PUSHIT_TOKEN > token saved by `pushit login`
-    let token = cli
-        .token
-        .clone()
-        .or_else(read_saved_token);
     if let Some(t) = token {
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {t}")).context("invalid token")?,
+            HeaderValue::from_str(&format!("Bearer {t}")).unwrap_or_else(|_| {
+                eprintln!("error: invalid token");
+                std::process::exit(1);
+            }),
         );
     }
-    if cli.dev {
+    if dev {
         headers.insert("X-Pushit-Dev", HeaderValue::from_static("1"));
     }
-    Ok(Client::builder().default_headers(headers).build()?)
+    Client::builder().default_headers(headers).build().unwrap()
 }
 
 fn saved_token_path() -> Option<PathBuf> {
@@ -780,7 +837,9 @@ const SKILL_MD: &str = include_str!("../../skills/pushit-app/SKILL.md");
 
 /// `pushit login`: open `{server}/auth/device` in a browser, catch the
 /// minted long-lived token on a localhost listener, store it for client().
-fn login(server: &str) -> Result<()> {
+/// The token lands in the target profile when there is one, else in the
+/// legacy single-token file.
+fn login(server: &str, target_profile: Option<&str>) -> Result<()> {
     use std::io::{Read as _, Write as _};
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
@@ -839,15 +898,94 @@ fn login(server: &str) -> Result<()> {
 
     let path = saved_token_path()
         .ok_or_else(|| anyhow!("cannot determine config dir (set HOME)"))?;
-    fs::create_dir_all(path.parent().unwrap())?;
-    fs::write(&path, &token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
-    }
     println!("logged in as {user}");
-    println!("token saved to {} (valid ~1 year, `pushit login` rotates it)", path.display());
+    match target_profile {
+        Some(name) => {
+            let mut store = profiles::load();
+            store.set_token(name, &token)?;
+            profiles::save(&store)?;
+            println!("token saved to profile '{name}'");
+        }
+        None => {
+            fs::create_dir_all(path.parent().unwrap())?;
+            fs::write(&path, &token)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+            }
+            println!("token saved to {}", path.display());
+        }
+    }
+    println!("token valid ~1 year; `pushit login` rotates it");
+    Ok(())
+}
+
+fn profile_cmd(cmd: ProfileCmd) -> Result<()> {
+    let mut store = profiles::load();
+    match cmd {
+        ProfileCmd::List => {
+            if store.profiles.is_empty() {
+                println!("no profiles (create one: pushit profile add <name> --server <url>)");
+                return Ok(());
+            }
+            for (name, e) in &store.profiles {
+                let active = if store.active.as_deref() == Some(name) { "*" } else { " " };
+                println!("{active} {name:<16} {}  token:{}", e.server, if e.token.is_empty() { "not set" } else { "set" });
+            }
+        }
+        ProfileCmd::Show { name } => {
+            let e = store.get(&name)?;
+            println!("name:   {name}");
+            println!("server: {}", e.server);
+            println!("token:  {}", if e.token.is_empty() { "not set (pushit login --profile {name})" } else { "set" });
+            println!("active: {}", store.active.as_deref() == Some(name.as_str()));
+        }
+        ProfileCmd::Use { name } => {
+            store.get(&name)?;
+            store.active = Some(name.clone());
+            profiles::save(&store)?;
+            println!("active profile: {name}");
+        }
+        ProfileCmd::Add { name, server } => {
+            if store.profiles.contains_key(&name) {
+                bail!("profile '{name}' already exists (remove it first)");
+            }
+            store.profiles.insert(
+                name.clone(),
+                profiles::Entry {
+                    server: server.trim_end_matches('/').to_string(),
+                    token: String::new(),
+                },
+            );
+            let first = store.active.is_none();
+            if first {
+                store.active = Some(name.clone());
+            }
+            profiles::save(&store)?;
+            println!("profile '{name}' added{}", if first { " and activated" } else { "" });
+            if first {
+                println!("next: pushit login --profile {name}");
+            }
+        }
+        ProfileCmd::Remove { name } => {
+            store.get(&name)?;
+            print!("delete profile '{name}'? [y/N] ");
+            std::io::Write::flush(&mut std::io::stderr())?;
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
+            if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+                println!("aborted");
+                return Ok(());
+            }
+            store.profiles.remove(&name);
+            if store.active.as_deref() == Some(name.as_str()) {
+                store.active = None;
+            }
+            profiles::save(&store)?;
+            println!("removed {name}");
+        }
+    }
     Ok(())
 }
 

@@ -3124,10 +3124,12 @@ dependencies = [
  "mime_guess",
  "pushit-controller",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tar",
  "tokio",
+ "toml 0.8.23",
 ]
 
 [[package]]

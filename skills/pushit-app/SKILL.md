@@ -120,7 +120,7 @@ pushit --dev rollback myapp           # previous revision
 pushit --dev rollback myapp --revision <id>
 ```
 
-`--dev` sends `X-Pushit-Dev: 1` — use against a dev controller (`PUSHIT_DEV=1`). For production: run `pushit login` once (browser → long-lived token in `~/.config/pushit/token`, reused automatically, ~1 year; `--token <jwt>` / `PUSHIT_TOKEN` still work and take precedence), plus `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`).
+`--dev` sends `X-Pushit-Dev: 1` — use against a dev controller (`PUSHIT_DEV=1`). For production: run `pushit login` once (browser → long-lived token in `~/.config/pushit/token`, reused automatically, ~1 year; `--token <jwt>` / `PUSHIT_TOKEN` still work and take precedence), plus `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`). Multiple push-it instances: `pushit profile add <name> --server <url>` → `pushit login --profile <name>` → `pushit profile use <name>` (active), `pushit --profile <name> <cmd>` for a one-off against another instance, `pushit profile list|show|remove` to manage.
 
 ## Testing and iterating
 
