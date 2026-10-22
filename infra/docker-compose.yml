@@ -1,7 +1,22 @@
+# Local test:   docker compose up -d controller      # platform only, http://localhost:9100
+# Full stack:   docker compose --profile edge up -d  # + Caddy (80/443) + Keycloak
 services:
+  controller:
+    build: ..
+    # Dockerfile lives at repo root; compose file is infra/
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    environment:
+      PUSHIT_DEV: "1"            # dev mode: CLI works with --dev, no OIDC needed
+      PUSHIT_BASE_DOMAIN: ${PUSHIT_BASE_DOMAIN:-localhost}
+    volumes:
+      - controller_data:/data
+
   caddy:
     image: caddy:2
     restart: unless-stopped
+    profiles: [edge]
     ports:
       - "80:80"
       - "443:443"
@@ -9,11 +24,12 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [keycloak]
+    depends_on: [controller, keycloak]
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     restart: unless-stopped
+    profiles: [edge]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD}
@@ -26,6 +42,7 @@ services:
       - ./realm-pushit.json:/opt/keycloak/data/import/realm-pushit.json:ro
 
 volumes:
+  controller_data:
   caddy_data:
   caddy_config:
   keycloak_data:
