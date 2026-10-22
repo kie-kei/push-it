@@ -105,6 +105,13 @@ else
   fail "logs endpoint"
 fi
 
+echo "==> second deploy (create previous revision)"
+if (cd examples/hello && "$PUSHIT_BIN" --dev deploy >/dev/null); then
+  pass "second deploy"
+else
+  fail "second deploy"
+fi
+
 echo "==> rollback"
 if "$PUSHIT_BIN" --dev rollback "$APP"; then
   pass "rollback"
