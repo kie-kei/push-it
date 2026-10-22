@@ -236,7 +236,7 @@ fn deploy(server: &str, client: &Client, args: DeployArgs) -> Result<()> {
         return deploy_root(server, client, &args, &manifest);
     }
 
-    deploy_one(server, client, args, &manifest)
+    deploy_one(server, client, args, manifest_text, &manifest)
 }
 
 fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serde_yaml::Value) -> Result<()> {
@@ -289,6 +289,19 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
                 continue;
             }
         };
+        // Runtime env is a deploy-time decision: required here, replaces the
+        // repo manifest's env wholesale (config lives with the deployer, not the code).
+        let env = match cfg.get("env") {
+            Some(v) if v.as_mapping().is_some() => v.clone(),
+            _ => {
+                eprintln!("FAIL {key}: explicit `env:` required in root manifest (use `env: {{}}` for none)");
+                failed.push(key.to_string());
+                continue;
+            }
+        };
+        let mut m = m;
+        m["env"] = env;
+        let manifest_text = serde_yaml::to_string(&m).context("re-serialize manifest")?;
         println!("==> {key}: build + deploy");
         // build locally (never on the server) from the app's own manifest
         let app_base = app_args.manifest.parent().unwrap_or_else(|| Path::new("."));
@@ -297,7 +310,7 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
             failed.push(key.to_string());
             continue;
         }
-        match deploy_one(server, client, app_args, &m) {
+        match deploy_one(server, client, app_args, manifest_text, &m) {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("FAIL {key}: {e:#}");
@@ -350,10 +363,9 @@ fn deploy_one(
     server: &str,
     client: &Client,
     args: DeployArgs,
+    manifest_text: String,
     manifest: &serde_yaml::Value,
 ) -> Result<()> {
-    let manifest_text = fs::read_to_string(&args.manifest)
-        .with_context(|| format!("read {}", args.manifest.display()))?;
     let name = manifest
         .get("name")
         .and_then(|v| v.as_str())

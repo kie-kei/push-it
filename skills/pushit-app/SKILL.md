@@ -29,8 +29,12 @@ apps:
     repo: git@internal:team/reporting-bot.git
     ref: main                # optional: branch or tag, default remote HEAD
     manifest: pushit.yaml    # optional: path inside the repo, default pushit.yaml
+    env:                     # REQUIRED: deploy-time env, replaces the repo manifest's env wholesale
+      API_URL: https://api.example.com
+      LOG_LEVEL: info
   status-page:
     repo: https://internal.example/status-page.git
+    env: {}                  # explicit empty — no env vars
 ```
 
 ```bash
@@ -40,6 +44,7 @@ pushit deploy --manifest /path/to/root/pushit.yaml   # one command → all apps
 Behavior:
 
 - Repos are shallow-cloned/pulled into `.pushit-cache/<name>/` **next to the root manifest** (add `.pushit-cache/` to .gitignore); `ref` is checked out on every deploy.
+- **`env:` per app is mandatory** and replaces the repo manifest's `env:` entirely — runtime config is a deploy-time decision owned by the platform repo, not the app code. Missing `env:` fails that app with a clear error. `env: {}` means explicitly no vars. Secrets still live in the app's manifest as names + `pushit secret set` values.
 - **Builds run locally** (the app's own `build.fn`/`build.ui`), never on the server — the controller stays toolchain-free.
 - Apps deploy sequentially; a failed app doesn't stop the rest. Exit code is non-zero and a `N app(s) failed: a, b` line lists them — rerun the same command to retry; redeploys are idempotent.
 - Per-app secrets must exist beforehand (`pushit secret set <app> KEY=V`); deploy fails fast with `missing secrets: …` otherwise.
