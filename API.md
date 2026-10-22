@@ -38,10 +38,10 @@ Auth (prod): `Authorization: Bearer <Keycloak access token>` — controller vali
 ## SQL capability
 
 Components may import `wasi:sql@0.2.0-draft` to run SQL through host
-functions. Grant logical connection names via `capabilities.sql` in
-pushit.yaml; the platform admin maps names to DSNs in
-`$PUSHIT_DATA/databases.yaml`. Drivers: postgres/mysql/sqlite (sqlx),
-ClickHouse (HTTP endpoint). See `docs/sql.md`.
+functions. Grant access via `capabilities.sql` in pushit.yaml: `local`
+(built-in app sqlite) or `$SECRET/<name>` (DSN in app secret `<name>`).
+Drivers: postgres/mysql/sqlite (sqlx), ClickHouse (HTTP endpoint).
+See `docs/sql.md`.
 
 Components may import `wasi:blobstore@0.2.0-draft` for object storage through
 host functions (opendal backend; `capabilities.blobstore` + `$PUSHIT_DATA/blobstores.yaml`;

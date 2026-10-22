@@ -136,7 +136,7 @@ pushit deploy (на машине разработчика или в CI):
 | env/secrets через хост | — | env подаётся при instantiate, секреты из SQLite | **MVP** |
 | `wasi:blobstore` | Phase 1 (draft, `0.2.0-draft`) | **Реализовано**: opendal (`services-s3`, `services-fs`), `capabilities.blobstore: [name]` → `blobstores.yaml`, whole-object буферы в MVP | **Done** |
 | `wasi:kv-store` | Phase 2 | host → Redis/Redis-кластер при появлении потребности | По потребности |
-| `wasi:sql` | Phase 1 | **Реализовано**: `sqlx::AnyPool` (postgres/mysql/sqlite) + ClickHouse через HTTP-эндпоинт; `capabilities.sql: [name]` → `databases.yaml` (name→DSN), креды у хоста; `local` — зарезервированное имя: встроенная sqlite-БД приложения `$PUSHIT_DATA/appdata/<app>/local.db`, переживает ревизии/rollback | **Done** |
+| `wasi:sql` | Phase 1 | **Реализовано**: `sqlx::AnyPool` (postgres/mysql/sqlite) + ClickHouse через HTTP-эндпоинт; `capabilities.sql`: `local` — встроенная sqlite-БД приложения `$PUSHIT_DATA/appdata/<app>/local.db` (переживает ревизии/rollback), `$SECRET/<name>` — DSN из секрета приложения, креды у хоста | **Done** |
 | `wasi:logging` | Phase 1 | **Реализовано**: `log(level, ctx, msg)` → строка в per-app лог-файл (`LogStore`), структурные уровни | **Done** |
 | `wasi:messaging` | Phase 2 | — | Не планируется до запроса |
 

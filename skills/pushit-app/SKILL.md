@@ -70,7 +70,7 @@ secrets:                         # names only — values are set via `pushit sec
 capabilities:                    # what the component is allowed to import/use
   http_out: ["api.example.com"]  # presence grants outgoing HTTP (MVP: unrestricted)
   env: [API_TOKEN]
-  sql: [local]                   # 'local' = built-in per-app sqlite; other names via databases.yaml
+  sql: [local]                   # 'local' = built-in per-app sqlite; $SECRET/<name> = DSN from app secret
   blobstore: [files]             # logical stores from blobstores.yaml
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip2
@@ -90,7 +90,7 @@ Rules that bite when violated:
 
 | Manifest | Guest imports | What it gives |
 |---|---|---|
-| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). DSNs live in controller's `databases.yaml` — credentials never reach the component. **`local` is reserved**: app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config needed — declare `sql: [local]` and use `Connection::open("local")`. Data survives redeploys and rollbacks |
+| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Grants: `local` (app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config, data survives redeploys/rollbacks) or `$SECRET/<name>` — DSN stored in app secret `<name>` (`pushit secret set`); credentials never reach the component |
 | `capabilities.blobstore: [name]` | `wasi:blobstore` `get-container`, `get-data`, `write-data`, `list-objects`… | Object storage via opendal (s3/fs). Streams objects — fine for large files |
 | (always available) | `wasi:logging` `log(level, ctx, msg)` | Structured lines into `pushit logs <app>` |
 | `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer sql/blobstore interfaces when they cover the service |
@@ -118,7 +118,7 @@ pushit --dev rollback myapp --revision <id>
 
 1. **Deploy-time failure** (400 from `pushit deploy`): read the error — it names the cause: bad manifest, missing secret, component missing `incoming-handler` export, wasm not a component.
 2. **Runtime failure**: `pushit logs -f myapp` in one shell, reproduce in another/browser. The log gets: component stdout/stderr, `wasi:logging` lines, `handler failed: …` (trap/panic), `handler timed out after 30s`, platform events (deploys, rollbacks).
-3. **Capability errors**: `connection 'x' not granted by capabilities.sql`, `missing from databases.yaml` — manifest ↔ platform-resource-file mismatch; fix the manifest or ask the platform admin to add the resource.
+3. **Capability errors**: `connection 'x' not granted by capabilities.sql`, `connection 'x' has no DSN (set it via pushit secret set)` — grant missing in the manifest or `$SECRET/<name>` secret not set; fix the manifest or `pushit secret set <app> <name> <dsn>`.
 4. **UI loads but `/_fn` 404/500**: check the handler actually matches the request path (it includes `/_fn` prefix) and the component didn't trap — `handler failed` in logs.
 5. **Rollback when broken**: `pushit rollback myapp` — instant revert to previous revision; investigate at leisure.
 

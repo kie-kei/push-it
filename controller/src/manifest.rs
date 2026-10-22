@@ -29,9 +29,9 @@ pub struct Capabilities {
     #[serde(default)]
     pub env: Vec<String>,
     /// Logical connection names this component may open via wasi:sql.
-    /// Names must exist in `$PUSHIT_DATA/databases.yaml`, except `local`
-    /// which is reserved for the app-scoped sqlite database
-    /// (`$PUSHIT_DATA/appdata/<app>/local.db`).
+    /// `local` is reserved for the app-scoped sqlite database
+    /// (`$PUSHIT_DATA/appdata/<app>/local.db`); `$SECRET/<name>` grants
+    /// resolve the DSN from app secret `<name>`.
     #[serde(default)]
     pub sql: Vec<String>,
     /// Logical blobstore names this component may open via wasi:blobstore.
@@ -57,10 +57,16 @@ impl Manifest {
             }
         }
         for n in &m.capabilities.sql {
-            if n.trim().is_empty() {
-                bail!("capabilities.sql: connection names must be non-empty");
+            if n == "local" {
+                continue;
             }
-            // local is reserved; nothing else to validate
+            match n.strip_prefix("$SECRET/") {
+                Some(key) if !key.trim().is_empty() => {}
+                _ => bail!(
+                    "capabilities.sql: '{n}' must be 'local' or '$SECRET/<name>' \
+                     where <name> is an app secret holding the DSN"
+                ),
+            }
         }
         Ok(m)
     }
@@ -136,10 +142,13 @@ build:
 
     #[test]
     fn parses_sql_capability() {
-        let m = Manifest::parse("name: a\ncapabilities:\n  sql: [sl, pg1]\n").unwrap();
-        assert_eq!(m.capabilities.sql, vec!["sl", "pg1"]);
+        let m = Manifest::parse("name: a\ncapabilities:\n  sql: [local, \"$SECRET/pg1\"]\n").unwrap();
+        assert_eq!(m.capabilities.sql, vec!["local", "$SECRET/pg1"]);
         let m = Manifest::parse("name: a\n").unwrap();
         assert!(m.capabilities.sql.is_empty());
+        // plain names no longer resolve anywhere — invalid
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [sl]\n").is_err());
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"$SECRET/ \"]\n").is_err());
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"\"]\n").is_err());
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\" \"]\n").is_err());
     }

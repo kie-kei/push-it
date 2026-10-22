@@ -1,10 +1,9 @@
 //! `wasi:sql@0.2.0-draft` host functions.
 //!
 //! Components open a logical connection name (granted via
-//! `capabilities.sql` in pushit.yaml); the host resolves it to a real DSN
-//! from `$PUSHIT_DATA/databases.yaml` — or, for grants of the form
-//! `$SECRET/<name>`, from the app secret `<name>`. Credentials never
-//! reach the guest.
+//! `capabilities.sql` in pushit.yaml); the host resolves it to a real DSN:
+//! `local` → built-in app sqlite, `$SECRET/<name>` → app secret, whose
+//! value is the DSN. Credentials never reach the guest.
 //!
 //! Drivers:
 //!   postgres|mysql|sqlite → sqlx `AnyPool`
@@ -22,7 +21,7 @@ use anyhow::{bail, Context, Result};
 use parking_lot::Mutex;
 use sqlx::Column;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use wasmtime::component::Resource;
 
@@ -86,29 +85,14 @@ pub struct SqlCtx {
     pub app_name: String,
     /// Names granted by the manifest (`capabilities.sql`).
     pub allowed: Vec<String>,
-    /// name → dsn, loaded from `$PUSHIT_DATA/databases.yaml`.
+    /// connection name → dsn, resolved from `$SECRET/` grants.
     pub dsns: HashMap<String, String>,
     /// Shared with `Runtime`: (revision-dir, name) → backend.
     pub(crate) pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<Backend>>>>,
 }
-/// name → dsn from `<data_dir>/databases.yaml`; absent file → empty map.
-pub fn load_databases(data_dir: &Path) -> Result<HashMap<String, String>> {
-    let path = data_dir.join("databases.yaml");
-    match std::fs::read_to_string(&path) {
-        Ok(s) => {
-            let m: HashMap<String, String> =
-                serde_yaml::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
-            Ok(m)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
-    }
-}
-
 /// Resolve `capabilities.sql` grants into (allowed names, name → dsn).
-/// `$SECRET/<name>` grants pull the DSN from app secret `<name>` (via
-/// `lookup`, which returns the decrypted value); plain names resolve
-/// against databases.yaml at open time as before.
+/// Grants are `local` (reserved, app-scoped sqlite) or `$SECRET/<name>`
+/// pulling the DSN from app secret `<name>` (via `lookup`).
 pub fn resolve_grants(
     grants: &[String],
     app: &str,
@@ -125,7 +109,11 @@ pub fn resolve_grants(
                 dsns.insert(key.to_string(), dsn);
                 allowed.push(key.to_string());
             }
-            None => allowed.push(grant.clone()),
+            None if grant == "local" => allowed.push(grant.clone()),
+            None => bail!(
+                "capabilities.sql: '{grant}' must be 'local' or '$SECRET/<name>' \
+                 (pushit secret set {app} {grant} <dsn>)"
+            ),
         }
     }
     Ok((allowed, dsns))
@@ -418,9 +406,9 @@ impl ComponentCtx {
 }
 
 impl bindings::wasi::sql::types::Host for ComponentCtx {}
-/// Resolve `name` against the manifest grant + databases.yaml.
+/// Resolve `name` against the manifest grant + secret-resolved DSNs.
 /// `local` is a reserved name: auto-resolves to `$PUSHIT_DATA/appdata/<app>/local.db`
-/// (app-scoped sqlite database, no entry in databases.yaml needed).
+/// (app-scoped sqlite database, no secret needed).
 fn authorize<'m>(
     name: &str,
     allowed: &'m [String],
@@ -434,7 +422,7 @@ fn authorize<'m>(
     }
     dsns.get(name)
         .map(|s| Some(s.as_str()))
-        .ok_or_else(|| format!("connection '{name}' missing from databases.yaml"))
+        .ok_or_else(|| format!("connection '{name}' has no DSN (set it via pushit secret set)"))
 }
 
 
@@ -596,22 +584,21 @@ mod tests {
     #[test]
     fn resolve_grants_mixed() {
         let grants = vec![
-            "plain-db".to_string(),
-            "$SECRET/arcadia-db".to_string(),
             "local".to_string(),
+            "$SECRET/arcadia-db".to_string(),
         ];
         let (allowed, dsns) = resolve_grants(&grants, "myapp", |k| {
             (k == "arcadia-db").then(|| "postgres://u:p@h/db".to_string())
         })
         .unwrap();
-        assert_eq!(allowed, ["plain-db", "arcadia-db", "local"]);
+        assert_eq!(allowed, ["local", "arcadia-db"]);
         assert_eq!(dsns["arcadia-db"], "postgres://u:p@h/db");
     }
 
     #[test]
-    fn resolve_grants_missing_secret() {
-        let err = resolve_grants(&["$SECRET/nope".to_string()], "myapp", |_| None).unwrap_err();
-        assert!(err.to_string().contains("secret 'nope' not set"));
+    fn resolve_grants_rejects_plain_names() {
+        let err = resolve_grants(&["plain-db".to_string()], "myapp", |_| None).unwrap_err();
+        assert!(err.to_string().contains("must be 'local' or '$SECRET/<name>'"));
     }
 
     #[test]
@@ -641,10 +628,10 @@ mod tests {
         assert!(authorize("pg", &allowed, &dsns).unwrap_err().contains("not granted"));
         // granted but no dsn configured
         let allowed2 = vec!["sl".to_string(), "pg".to_string()];
-        assert!(authorize("pg", &allowed2, &dsns).unwrap_err().contains("databases.yaml"));
+        assert!(authorize("pg", &allowed2, &dsns).unwrap_err().contains("has no DSN"));
         // granted but nothing configured at all
         assert!(authorize("sl", &allowed, &HashMap::new()).is_err());
-        // local is reserved: granted via manifest, resolves without databases.yaml
+        // local is reserved: granted via manifest, resolves without a DSN
         let allowed3 = vec!["local".to_string()];
         assert_eq!(authorize("local", &allowed3, &HashMap::new()).unwrap(), None);
     }
@@ -693,12 +680,4 @@ mod tests {
         assert!(c.user.is_none());
     }
 
-    #[test]
-    fn load_databases_missing_and_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(load_databases(dir.path()).unwrap().is_empty());
-        std::fs::write(dir.path().join("databases.yaml"), "sl: sqlite:///tmp/x.db\n").unwrap();
-        let m = load_databases(dir.path()).unwrap();
-        assert_eq!(m["sl"], "sqlite:///tmp/x.db");
-    }
 }

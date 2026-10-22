@@ -603,11 +603,7 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Ok(r) => r,
         Err(e) => return err500(e.into()),
     };
-    let mut sql_dsns = match crate::sql_host::load_databases(&s.cfg.data_dir) {
-        Ok(m) => m,
-        Err(e) => return err500(e),
-    };
-    let (sql_allowed, secret_dsns) =
+    let (sql_allowed, sql_dsns) =
         match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |key| {
             s.db
                 .get_secret_enc(&app.name, key)
@@ -619,7 +615,6 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
             Ok(r) => r,
             Err(e) => return err500(e),
         };
-    sql_dsns.extend(secret_dsns);
     let blob_stores = match crate::blob_host::load_blobstores(&s.cfg.data_dir) {
         Ok(m) => m,
         Err(e) => return err500(e),

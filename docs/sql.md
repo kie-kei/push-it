@@ -45,41 +45,26 @@ pushit.yaml:
 
 ```yaml
 capabilities:
-  sql: [sl, analytics]   # logical names only, no credentials
+  sql: [local, $SECRET/arcadia-db]   # 'local' = built-in per-app sqlite
 ```
 
-Platform admin maps names to DSNs in `$PUSHIT_DATA/databases.yaml`:
+Each grant is either:
 
-```yaml
-sl: sqlite:///var/lib/pushit/hello.db
-pg1: postgres://user:pass@db.internal/app
-analytics: clickhouse://default:secret@ch:8123/metrics
-```
-
-`connection.open(name)` succeeds only if `name` is in `capabilities.sql`
-*and* present in `databases.yaml`; otherwise it returns an error
-resource (`"not granted by capabilities.sql"` / `"missing from
-databases.yaml"`). Pools are cached per (app revision, name).
-
-### App-managed DSNs (`$SECRET/` grants)
-
-An app can own its DSNs without touching the platform's
-`databases.yaml`: grant `$SECRET/<name>` and store the DSN in the app
-secret `<name>`:
-
-```yaml
-capabilities:
-  sql: [$SECRET/arcadia-db]
-```
+- `local` — reserved name: app-scoped sqlite at
+  `$PUSHIT_DATA/appdata/<app>/local.db`, no configuration needed; or
+- `$SECRET/<name>` — the DSN is stored in the app secret `<name>`:
 
 ```bash
 pushit secret set myapp arcadia-db 'postgres://user:pass@arcadiamusicalliance.com:5432/arcadia'
 ```
 
 The guest opens `connection.open("arcadia-db")`; the controller reads the
-secret and connects itself — the DSN never reaches the component. Plain
-names and `$SECRET/` grants can be mixed. Missing secret → 500 with a
-hint to `pushit secret set`.
+secret and connects itself — the DSN never reaches the component.
+Anything else in `capabilities.sql` fails manifest validation.
+
+`connection.open(name)` succeeds only if `name` is in `capabilities.sql`
+and a DSN is resolvable for it; otherwise it returns an error resource.
+Pools are cached per (app revision, name).
 
 ## Drivers
 
