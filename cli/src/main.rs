@@ -178,7 +178,11 @@ fn build(args: &BuildArgs) -> Result<()> {
     let manifest: serde_yaml::Value =
         serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
     let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    run_build_steps(&manifest, &base)
+}
 
+/// Run `build.fn`/`build.ui` from the manifest + verify artifacts.
+fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
     let mut ran_any = false;
     for key in ["fn", "ui"] {
         let Some(cmd) = manifest
@@ -224,6 +228,132 @@ fn deploy(server: &str, client: &Client, args: DeployArgs) -> Result<()> {
     let manifest_text =
         fs::read_to_string(&args.manifest).with_context(|| format!("read {}", args.manifest.display()))?;
     let manifest: serde_yaml::Value = serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
+
+    // Root manifest: `apps:` maps name → {repo, ref?, manifest?}.
+    // Each app is cloned/pulled next to the root manifest and built+deployed
+    // from its own pushit.yaml (build runs locally, per app).
+    if manifest.get("apps").is_some() {
+        return deploy_root(server, client, &args, &manifest);
+    }
+
+    deploy_one(server, client, args, &manifest)
+}
+
+fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serde_yaml::Value) -> Result<()> {
+    let apps = manifest
+        .get("apps")
+        .and_then(|v| v.as_mapping())
+        .ok_or_else(|| anyhow!("root manifest: `apps:` must be a mapping of name → {{repo, ...}}"))?;
+    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let cache = base.join(".pushit-cache");
+    fs::create_dir_all(&cache)?;
+
+    let mut failed = Vec::new();
+    for (key, cfg) in apps {
+        let key = key.as_str().ok_or_else(|| anyhow!("apps: keys must be strings"))?;
+        let repo = cfg
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("apps.{key}: missing `repo`"))?;
+        let git_ref = cfg.get("ref").and_then(|v| v.as_str());
+        let inner = cfg
+            .get("manifest")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pushit.yaml");
+
+        let dir = cache.join(key);
+        println!("==> {key}: sync {repo} ({})", git_ref.unwrap_or("HEAD"));
+        if let Err(e) = sync_repo(repo, git_ref, &dir) {
+            eprintln!("FAIL {key}: sync: {e:#}");
+            failed.push(key.to_string());
+            continue;
+        }
+        let app_args = DeployArgs {
+            manifest: dir.join(inner),
+            wasm: None, // per-app overrides don't make sense from the root manifest
+            dist: None,
+        };
+        let manifest_text = match fs::read_to_string(&app_args.manifest) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("FAIL {key}: {}: {e}", app_args.manifest.display());
+                failed.push(key.to_string());
+                continue;
+            }
+        };
+        let m: serde_yaml::Value = match serde_yaml::from_str(&manifest_text) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("FAIL {key}: parse {}: {e}", app_args.manifest.display());
+                failed.push(key.to_string());
+                continue;
+            }
+        };
+        println!("==> {key}: build + deploy");
+        // build locally (never on the server) from the app's own manifest
+        let app_base = app_args.manifest.parent().unwrap_or_else(|| Path::new("."));
+        if let Err(e) = run_build_steps(&m, app_base) {
+            eprintln!("FAIL {key}: {e:#}");
+            failed.push(key.to_string());
+            continue;
+        }
+        match deploy_one(server, client, app_args, &m) {
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("FAIL {key}: {e:#}");
+                failed.push(key.to_string());
+            }
+        }
+    }
+    if failed.is_empty() {
+        println!("all apps deployed");
+        Ok(())
+    } else {
+        bail!("{} app(s) failed: {}", failed.len(), failed.join(", "))
+    }
+}
+
+/// Clone or update `repo` at `dir`; shallow, `git_ref` = branch or tag.
+fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
+    let run = |mut cmd: std::process::Command| -> Result<()> {
+        let out = cmd.output().context("spawn git")?;
+        if !out.status.success() {
+            bail!(
+                "git failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
+    };
+    if dir.join(".git").exists() {
+        let mut fetch = std::process::Command::new("git");
+        fetch.arg("-C").arg(dir).arg("fetch").arg("--depth").arg("1").arg("origin");
+        // specific ref, else remote HEAD
+        fetch.arg(git_ref.unwrap_or("HEAD"));
+        run(fetch)?;
+        let mut reset = std::process::Command::new("git");
+        reset.arg("-C").arg(dir).arg("reset").arg("--hard").arg("FETCH_HEAD");
+        run(reset)?;
+        Ok(())
+    } else {
+        let mut clone = std::process::Command::new("git");
+        clone.arg("clone").arg("--depth").arg("1");
+        if let Some(r) = git_ref {
+            clone.arg("--branch").arg(r);
+        }
+        clone.arg(repo).arg(dir);
+        run(clone)
+    }
+}
+
+fn deploy_one(
+    server: &str,
+    client: &Client,
+    args: DeployArgs,
+    manifest: &serde_yaml::Value,
+) -> Result<()> {
+    let manifest_text = fs::read_to_string(&args.manifest)
+        .with_context(|| format!("read {}", args.manifest.display()))?;
     let name = manifest
         .get("name")
         .and_then(|v| v.as_str())

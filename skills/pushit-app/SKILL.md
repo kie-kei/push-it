@@ -18,6 +18,32 @@ pushit --dev deploy        # upload and activate
 
 The routine loop is exactly two commands: `pushit build` (or just `pushit deploy` when artifacts are already built) and `pushit --dev deploy`. No extra tooling — the CLI reads `build:` commands out of `pushit.yaml`, so the manifest is both the IaC unit and the build definition.
 
+## Deploying multiple apps from one manifest (repos + one command)
+
+A **root manifest** lists apps as git repos; `pushit deploy` syncs, builds, and deploys every one of them:
+
+```yaml
+# pushit.yaml (root, e.g. platform/ or infra/ repo)
+apps:
+  reporting-bot:
+    repo: git@internal:team/reporting-bot.git
+    ref: main                # optional: branch or tag, default remote HEAD
+    manifest: pushit.yaml    # optional: path inside the repo, default pushit.yaml
+  status-page:
+    repo: https://internal.example/status-page.git
+```
+
+```bash
+pushit deploy --manifest /path/to/root/pushit.yaml   # one command → all apps
+```
+
+Behavior:
+
+- Repos are shallow-cloned/pulled into `.pushit-cache/<name>/` **next to the root manifest** (add `.pushit-cache/` to .gitignore); `ref` is checked out on every deploy.
+- **Builds run locally** (the app's own `build.fn`/`build.ui`), never on the server — the controller stays toolchain-free.
+- Apps deploy sequentially; a failed app doesn't stop the rest. Exit code is non-zero and a `N app(s) failed: a, b` line lists them — rerun the same command to retry; redeploys are idempotent.
+- Per-app secrets must exist beforehand (`pushit secret set <app> KEY=V`); deploy fails fast with `missing secrets: …` otherwise.
+
 ## The app contract
 
 ```
