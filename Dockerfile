@@ -1,7 +1,8 @@
 # PushIt controller — WASM runtime in-process, no child processes/sockets needed.
 # Builder = full rust image (buildpack-deps): aws-lc-sys needs cmake+perl,
-# which rust:1-slim does not ship.
-FROM rust:1 AS build
+# which slim images do not ship. -bookworm pin: default rust:1 is trixie-based,
+# its binary needs newer glibc than the bookworm runtime stage.
+FROM rust:1-bookworm AS build
 WORKDIR /src
 # manifest layer first for dep caching
 COPY Cargo.toml Cargo.lock ./
