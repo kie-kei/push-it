@@ -27,6 +27,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Print the PushIt app development guide (for agents and humans).
+    Skill,
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
     Build(BuildArgs),
     /// Scaffold pushit.yaml + fn/ + ui/ in the current directory.
@@ -106,6 +108,10 @@ fn main() -> Result<()> {
     let client = client(&cli)?;
     let server = cli.server.trim_end_matches('/').to_string();
     match cli.cmd {
+        Cmd::Skill => {
+            print!("{}", include_str!("../../skills/pushit-app/SKILL.md"));
+            Ok(())
+        }
         Cmd::Build(a) => build(&a),
         Cmd::Init(a) => init(a),
         Cmd::Deploy(a) => deploy(&server, &client, a),
