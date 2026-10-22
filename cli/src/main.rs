@@ -25,7 +25,7 @@ struct Cli {
     #[arg(long, global = true, env = "PUSHIT_PROFILE")]
     profile: Option<String>,
     /// Dev mode: send X-Pushit-Dev: 1 instead of requiring a token.
-    #[arg(long, global = true, env = "PUSHIT_DEV")]
+    #[arg(long, global = true)]
     dev: bool,
     #[command(subcommand)]
     cmd: Cmd,
@@ -203,7 +203,11 @@ fn main() -> Result<()> {
                 .filter(|t| !t.is_empty())
         })
         .or_else(read_saved_token);
-    let client = client_for(cli.dev, token);
+    let dev = cli.dev
+        || std::env::var("PUSHIT_DEV")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+    let client = client_for(dev, token);
     match cli.cmd {
         Cmd::Skill { cmd } => match cmd {
             None => {
@@ -781,14 +785,14 @@ fn build_archive(wasm: &Path, dist: Option<&Path>) -> Result<Vec<u8>> {
 }
 
 fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
-    const GLOBAL: &str = "api/secrets/global";
+    const GLOBAL: &str = "/api/secrets/global";
     match cmd {
         SecretCmd::Set { app, pair } => {
             let (key, value) = pair
                 .split_once('=')
                 .ok_or_else(|| anyhow!("expected <KEY>=<value>"))?;
             let resp = client
-                .put(url(server, &format!("api/apps/{app}/secrets/{key}")))
+                .put(url(server, &format!("/api/apps/{app}/secrets/{key}")))
                 .header(reqwest::header::CONTENT_TYPE, "text/plain")
                 .body(value.to_string())
                 .send()?;
@@ -796,12 +800,12 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
             println!("set {key} for {app}");
         }
         SecretCmd::Ls { app } => {
-            let resp = client.get(url(server, &format!("api/apps/{app}/secrets"))).send()?;
+            let resp = client.get(url(server, &format!("/api/apps/{app}/secrets"))).send()?;
             println!("{}", check(resp)?.text()?);
         }
         SecretCmd::Rm { app, key } => {
             let resp = client
-                .delete(url(server, &format!("api/apps/{app}/secrets/{key}")))
+                .delete(url(server, &format!("/api/apps/{app}/secrets/{key}")))
                 .send()?;
             check(resp)?;
             println!("removed {key} from {app}");
