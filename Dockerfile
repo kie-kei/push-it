@@ -4,6 +4,9 @@ WORKDIR /src
 # manifest layer first for dep caching
 COPY Cargo.toml Cargo.lock ./
 COPY controller ./controller
+# workspace member — required for manifest resolution even though only the
+# controller is built
+COPY cli ./cli
 RUN cargo build --release -p pushit-controller
 
 FROM debian:bookworm-slim
