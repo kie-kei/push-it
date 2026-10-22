@@ -603,10 +603,23 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Ok(r) => r,
         Err(e) => return err500(e.into()),
     };
-    let sql_dsns = match crate::sql_host::load_databases(&s.cfg.data_dir) {
+    let mut sql_dsns = match crate::sql_host::load_databases(&s.cfg.data_dir) {
         Ok(m) => m,
         Err(e) => return err500(e),
     };
+    let (sql_allowed, secret_dsns) =
+        match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |key| {
+            s.db
+                .get_secret_enc(&app.name, key)
+                .ok()
+                .flatten()
+                .and_then(|enc| s.secrets.decrypt(&enc).ok())
+                .map(|v| String::from_utf8_lossy(&v).into_owned())
+        }) {
+            Ok(r) => r,
+            Err(e) => return err500(e),
+        };
+    sql_dsns.extend(secret_dsns);
     let blob_stores = match crate::blob_host::load_blobstores(&s.cfg.data_dir) {
         Ok(m) => m,
         Err(e) => return err500(e),
@@ -614,7 +627,7 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
     let caps = crate::runtime::HostCaps {
         allow_http_out: manifest.http_out(),
         data_dir: s.cfg.data_dir.clone(),
-        sql_allowed: manifest.capabilities.sql.clone(),
+        sql_allowed,
         sql_dsns,
         blob_allowed: manifest.capabilities.blobstore.clone(),
         blob_stores,

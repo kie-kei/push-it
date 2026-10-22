@@ -61,6 +61,26 @@ analytics: clickhouse://default:secret@ch:8123/metrics
 resource (`"not granted by capabilities.sql"` / `"missing from
 databases.yaml"`). Pools are cached per (app revision, name).
 
+### App-managed DSNs (`$SECRET/` grants)
+
+An app can own its DSNs without touching the platform's
+`databases.yaml`: grant `$SECRET/<name>` and store the DSN in the app
+secret `<name>`:
+
+```yaml
+capabilities:
+  sql: [$SECRET/arcadia-db]
+```
+
+```bash
+pushit secret set myapp arcadia-db 'postgres://user:pass@arcadiamusicalliance.com:5432/arcadia'
+```
+
+The guest opens `connection.open("arcadia-db")`; the controller reads the
+secret and connects itself — the DSN never reaches the component. Plain
+names and `$SECRET/` grants can be mixed. Missing secret → 500 with a
+hint to `pushit secret set`.
+
 ## Drivers
 
 | DSN scheme | Driver | Notes |

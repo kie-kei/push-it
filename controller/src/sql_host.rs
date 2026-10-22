@@ -2,7 +2,9 @@
 //!
 //! Components open a logical connection name (granted via
 //! `capabilities.sql` in pushit.yaml); the host resolves it to a real DSN
-//! from `$PUSHIT_DATA/databases.yaml`. Credentials never reach the guest.
+//! from `$PUSHIT_DATA/databases.yaml` — or, for grants of the form
+//! `$SECRET/<name>`, from the app secret `<name>`. Credentials never
+//! reach the guest.
 //!
 //! Drivers:
 //!   postgres|mysql|sqlite → sqlx `AnyPool`
@@ -101,6 +103,32 @@ pub fn load_databases(data_dir: &Path) -> Result<HashMap<String, String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
         Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
     }
+}
+
+/// Resolve `capabilities.sql` grants into (allowed names, name → dsn).
+/// `$SECRET/<name>` grants pull the DSN from app secret `<name>` (via
+/// `lookup`, which returns the decrypted value); plain names resolve
+/// against databases.yaml at open time as before.
+pub fn resolve_grants(
+    grants: &[String],
+    app: &str,
+    mut lookup: impl FnMut(&str) -> Option<String>,
+) -> Result<(Vec<String>, HashMap<String, String>)> {
+    let mut allowed = Vec::with_capacity(grants.len());
+    let mut dsns = HashMap::new();
+    for grant in grants {
+        match grant.strip_prefix("$SECRET/") {
+            Some(key) => {
+                let dsn = lookup(key).with_context(|| {
+                    format!("capabilities.sql: secret '{key}' not set for app '{app}' (pushit secret set {app} {key} <dsn>)")
+                })?;
+                dsns.insert(key.to_string(), dsn);
+                allowed.push(key.to_string());
+            }
+            None => allowed.push(grant.clone()),
+        }
+    }
+    Ok((allowed, dsns))
 }
 
 enum Driver {
@@ -564,6 +592,27 @@ pub fn add_to_linker(linker: &mut wasmtime::component::Linker<ComponentCtx>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_grants_mixed() {
+        let grants = vec![
+            "plain-db".to_string(),
+            "$SECRET/arcadia-db".to_string(),
+            "local".to_string(),
+        ];
+        let (allowed, dsns) = resolve_grants(&grants, "myapp", |k| {
+            (k == "arcadia-db").then(|| "postgres://u:p@h/db".to_string())
+        })
+        .unwrap();
+        assert_eq!(allowed, ["plain-db", "arcadia-db", "local"]);
+        assert_eq!(dsns["arcadia-db"], "postgres://u:p@h/db");
+    }
+
+    #[test]
+    fn resolve_grants_missing_secret() {
+        let err = resolve_grants(&["$SECRET/nope".to_string()], "myapp", |_| None).unwrap_err();
+        assert!(err.to_string().contains("secret 'nope' not set"));
+    }
 
     #[test]
     fn driver_scheme() {
