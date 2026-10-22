@@ -88,6 +88,21 @@ enum SecretCmd {
     Ls { app: String },
     /// Remove a secret.
     Rm { app: String, key: String },
+    /// Platform-wide secrets shared by apps (referenced as $PLATFORM/<logical>).
+    Global {
+        #[command(subcommand)]
+        cmd: GlobalCmd,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum GlobalCmd {
+    /// Set a platform-wide secret: pushit secret global set <KEY>=<value>
+    Set { pair: String },
+    /// List platform-wide secret names.
+    Ls,
+    /// Remove a platform-wide secret.
+    Rm { key: String },
 }
 
 #[derive(Args)]
@@ -315,6 +330,17 @@ fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serd
         };
         let mut m = m;
         m["env"] = env;
+        // $PLATFORM/<logical> sql grants: bind app-local logical names to
+        // platform-wide global secret names (deployer knowledge, not repo).
+        if let Some(bindings) = cfg.get("platform_secrets") {
+            if bindings.as_mapping().is_some() {
+                m["platform_secrets"] = bindings.clone();
+            } else {
+                eprintln!("FAIL {key}: platform_secrets must be a mapping of logical → global name");
+                failed.push(key.to_string());
+                continue;
+            }
+        }
         let manifest_text = serde_yaml::to_string(&m).context("re-serialize manifest")?;
         println!("==> {key}: build + deploy");
         // build locally (never on the server) from the app's own manifest
@@ -509,6 +535,24 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             }
         }
 
+        // platform_secrets bindings (root manifest is authoritative)
+        if let Some(bindings) = cfg.get("platform_secrets").filter(|v| v.as_mapping().is_some()) {
+            let live_bindings = live_manifest
+                .get("platform_secrets")
+                .and_then(|v| v.as_mapping())
+                .cloned()
+                .unwrap_or_default();
+            for (k, v) in bindings.as_mapping().unwrap() {
+                if live_bindings.get(k) != Some(v) {
+                    changes.push(format!(
+                        "platform_secrets.{} = {:?}",
+                        k.as_str().unwrap_or("?"),
+                        v.as_str().unwrap_or("?")
+                    ));
+                }
+            }
+        }
+
         if changes.is_empty() {
             println!("up to date (config; code changes deploy as a new revision)");
         } else {
@@ -619,13 +663,14 @@ fn build_archive(wasm: &Path, dist: Option<&Path>) -> Result<Vec<u8>> {
 }
 
 fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
+    const GLOBAL: &str = "api/secrets/global";
     match cmd {
         SecretCmd::Set { app, pair } => {
             let (key, value) = pair
                 .split_once('=')
                 .ok_or_else(|| anyhow!("expected <KEY>=<value>"))?;
             let resp = client
-                .put(url(server, &format!("/api/apps/{app}/secrets/{key}")))
+                .put(url(server, &format!("api/apps/{app}/secrets/{key}")))
                 .header(reqwest::header::CONTENT_TYPE, "text/plain")
                 .body(value.to_string())
                 .send()?;
@@ -633,16 +678,39 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
             println!("set {key} for {app}");
         }
         SecretCmd::Ls { app } => {
-            let resp = client.get(url(server, &format!("/api/apps/{app}/secrets"))).send()?;
+            let resp = client.get(url(server, &format!("api/apps/{app}/secrets"))).send()?;
             println!("{}", check(resp)?.text()?);
         }
         SecretCmd::Rm { app, key } => {
             let resp = client
-                .delete(url(server, &format!("/api/apps/{app}/secrets/{key}")))
+                .delete(url(server, &format!("api/apps/{app}/secrets/{key}")))
                 .send()?;
             check(resp)?;
             println!("removed {key} from {app}");
         }
+        SecretCmd::Global { cmd } => match cmd {
+            GlobalCmd::Set { pair } => {
+                let (key, value) = pair
+                    .split_once('=')
+                    .ok_or_else(|| anyhow!("expected <KEY>=<value>"))?;
+                let resp = client
+                    .put(url(server, &format!("{GLOBAL}/{key}")))
+                    .header(reqwest::header::CONTENT_TYPE, "text/plain")
+                    .body(value.to_string())
+                    .send()?;
+                check(resp)?;
+                println!("set global secret {key}");
+            }
+            GlobalCmd::Ls => {
+                let resp = client.get(url(server, GLOBAL)).send()?;
+                println!("{}", check(resp)?.text()?);
+            }
+            GlobalCmd::Rm { key } => {
+                let resp = client.delete(url(server, &format!("{GLOBAL}/{key}"))).send()?;
+                check(resp)?;
+                println!("removed global secret {key}");
+            }
+        },
     }
     Ok(())
 }

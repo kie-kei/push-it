@@ -70,7 +70,7 @@ secrets:                         # names only — values are set via `pushit sec
 capabilities:                    # what the component is allowed to import/use
   http_out: ["api.example.com"]  # presence grants outgoing HTTP (MVP: unrestricted)
   env: [API_TOKEN]
-  sql: [local]                   # 'local' = built-in per-app sqlite; $SECRET/<name> = DSN from app secret
+  sql: [local]                   # 'local' = built-in per-app sqlite; $SECRET/<name> = DSN from app secret; $PLATFORM/<logical> = shared platform secret (bound in deploy manifest)
   blobstore: [files]             # logical stores from blobstores.yaml
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip2
@@ -90,7 +90,7 @@ Rules that bite when violated:
 
 | Manifest | Guest imports | What it gives |
 |---|---|---|
-| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Grants: `local` (app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config, data survives redeploys/rollbacks) or `$SECRET/<name>` — DSN stored in app secret `<name>` (`pushit secret set`); credentials never reach the component |
+| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Grants: `local` (app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config, data survives redeploys/rollbacks), `$SECRET/<name>` (DSN in app secret `<name>`), `$PLATFORM/<logical>` (DSN in a platform-wide secret; the deployer binds logical → global name in the root manifest, `pushit secret global set`). Credentials never reach the component |
 | `capabilities.blobstore: [name]` | `wasi:blobstore` `get-container`, `get-data`, `write-data`, `list-objects`… | Object storage via opendal (s3/fs). Streams objects — fine for large files |
 | (always available) | `wasi:logging` `log(level, ctx, msg)` | Structured lines into `pushit logs <app>` |
 | `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer sql/blobstore interfaces when they cover the service |

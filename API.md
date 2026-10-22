@@ -39,7 +39,9 @@ Auth (prod): `Authorization: Bearer <Keycloak access token>` — controller vali
 
 Components may import `wasi:sql@0.2.0-draft` to run SQL through host
 functions. Grant access via `capabilities.sql` in pushit.yaml: `local`
-(built-in app sqlite) or `$SECRET/<name>` (DSN in app secret `<name>`).
+(built-in app sqlite), `$SECRET/<name>` (DSN in app secret `<name>`) or
+`$PLATFORM/<logical>` (DSN in a platform-wide secret; the deployer binds
+logical → global name in the root manifest).
 Drivers: postgres/mysql/sqlite (sqlx), ClickHouse (HTTP endpoint).
 See `docs/sql.md`.
 

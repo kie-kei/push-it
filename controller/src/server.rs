@@ -47,6 +47,11 @@ pub fn router(state: S) -> Router {
             "/api/apps/{name}/secrets/{key}",
             put(api_set_secret).delete(api_delete_secret),
         )
+        .route("/api/secrets/global", get(api_list_global_secrets))
+        .route(
+            "/api/secrets/global/{key}",
+            put(api_set_global_secret).delete(api_delete_global_secret),
+        )
         .route("/api/apps/{name}/logs", get(api_logs))
         .route("/api/apps/{name}/logs/stream", get(api_logs_stream))
         .route("/auth/login", get(auth_login))
@@ -287,6 +292,39 @@ async fn api_delete_secret(
 ) -> Result<Response, Response> {
     require_api_user(&s, &headers).await?;
     s.db.delete_secret(&name, &key).map_err(err500)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// platform-wide (global) secrets
+
+async fn api_list_global_secrets(
+    State(s): State<S>,
+    headers: HeaderMap,
+) -> Result<Response, Response> {
+    require_api_user(&s, &headers).await?;
+    let keys = s.db.global_secret_names().map_err(err500)?;
+    Ok(axum::Json(serde_json::json!({ "keys": keys })).into_response())
+}
+
+async fn api_set_global_secret(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+    body: Bytes,
+) -> Result<Response, Response> {
+    require_api_user(&s, &headers).await?;
+    let enc = s.secrets.encrypt(&body).map_err(err500)?;
+    s.db.set_global_secret(&key, &enc).map_err(err500)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn api_delete_global_secret(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path(key): Path<String>,
+) -> Result<Response, Response> {
+    require_api_user(&s, &headers).await?;
+    s.db.delete_global_secret(&key).map_err(err500)?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -603,7 +641,8 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
         Ok(r) => r,
         Err(e) => return err500(e.into()),
     };
-    let (sql_allowed, sql_dsns) =
+    let (sql_allowed, sql_dsns) = {
+        let bindings = &manifest.platform_secrets;
         match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |key| {
             s.db
                 .get_secret_enc(&app.name, key)
@@ -611,10 +650,17 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
                 .flatten()
                 .and_then(|enc| s.secrets.decrypt(&enc).ok())
                 .map(|v| String::from_utf8_lossy(&v).into_owned())
+        }, |logical| {
+            bindings
+                .get(logical)
+                .and_then(|g| s.db.get_global_secret(g).ok().flatten())
+                .and_then(|enc| s.secrets.decrypt(&enc).ok())
+                .map(|v| String::from_utf8_lossy(&v).into_owned())
         }) {
             Ok(r) => r,
             Err(e) => return err500(e),
-        };
+        }
+    };
     let blob_stores = match crate::blob_host::load_blobstores(&s.cfg.data_dir) {
         Ok(m) => m,
         Err(e) => return err500(e),

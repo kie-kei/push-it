@@ -48,8 +48,9 @@ pushit logs myapp
 
 Компоненты могут импортировать `wasi:sql@0.2.0-draft` — SQL через хост-функции.
 Доступ: `capabilities.sql` в pushit.yaml (`local` — встроенная sqlite приложения,
-`$SECRET/имя` — DSN из секрета приложения). Драйверы: postgres/mysql/sqlite через sqlx,
-ClickHouse через HTTP-эндпоинт. См. `docs/sql.md`.
+`$SECRET/имя` — DSN из секрета приложения, `$PLATFORM/имя` — общий на платформе
+секрет, привязка имени — в root-манифесте деплоя). Драйверы: postgres/mysql/sqlite
+через sqlx, ClickHouse через HTTP-эндпоинт. См. `docs/sql.md`.
 Также `wasi:blobstore@0.2.0-draft` (opendal: s3/fs, `capabilities.blobstore` +
 `$PUSHIT_DATA/blobstores.yaml`, см. `docs/blobstore.md`) и
 `wasi:logging@0.1.0-draft` (структурный лог в per-app файл, `docs/logging.md`).

@@ -60,7 +60,10 @@ impl Db {
                app TEXT NOT NULL,
                key TEXT NOT NULL,
                value_enc BLOB NOT NULL,
-               PRIMARY KEY(app, key));",
+               PRIMARY KEY(app, key));
+             CREATE TABLE IF NOT EXISTS global_secrets(
+               key TEXT PRIMARY KEY,
+               value_enc BLOB NOT NULL);",
         )?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
@@ -285,6 +288,44 @@ impl Db {
             .query_map(params![app], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<Vec<(String, Vec<u8>)>>>()?;
         Ok(rows)
+    }
+
+    // ---- platform-wide (global) secrets ----
+
+    pub fn set_global_secret(&self, key: &str, enc: &[u8]) -> Result<()> {
+        self.c().execute(
+            "INSERT INTO global_secrets(key,value_enc) VALUES(?1,?2)
+             ON CONFLICT(key) DO UPDATE SET value_enc=?2",
+            params![key, enc],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_global_secret(&self, key: &str) -> Result<()> {
+        self.c()
+            .execute("DELETE FROM global_secrets WHERE key=?1", params![key])?;
+        Ok(())
+    }
+
+    pub fn global_secret_names(&self) -> Result<Vec<String>> {
+        let conn = self.c();
+        let mut st =
+            conn.prepare("SELECT key FROM global_secrets ORDER BY key")?;
+        let rows = st
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
+    pub fn get_global_secret(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        self.c()
+            .query_row(
+                "SELECT value_enc FROM global_secrets WHERE key=?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 }
 

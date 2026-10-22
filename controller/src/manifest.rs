@@ -17,6 +17,11 @@ pub struct Manifest {
     pub secrets: Vec<String>,
     #[serde(default)]
     pub capabilities: Capabilities,
+    /// Deploy-time bindings for `$PLATFORM/<logical>` sql grants:
+    /// app-local logical name → platform-wide global secret name.
+    /// Authored by the deployer (root manifest injects it), not the app repo.
+    #[serde(default)]
+    pub platform_secrets: BTreeMap<String, String>,
     #[serde(default)]
     pub build: Build,
 }
@@ -60,13 +65,29 @@ impl Manifest {
             if n == "local" {
                 continue;
             }
-            match n.strip_prefix("$SECRET/") {
-                Some(key) if !key.trim().is_empty() => {}
-                _ => bail!(
-                    "capabilities.sql: '{n}' must be 'local' or '$SECRET/<name>' \
-                     where <name> is an app secret holding the DSN"
-                ),
+            if let Some(logical) = n.strip_prefix("$SECRET/") {
+                if logical.trim().is_empty() {
+                    bail!("capabilities.sql: '$SECRET/' needs a secret name");
+                }
+                continue;
             }
+            if let Some(logical) = n.strip_prefix("$PLATFORM/") {
+                if logical.trim().is_empty() {
+                    bail!("capabilities.sql: '$PLATFORM/' needs a logical name");
+                }
+                if !m.platform_secrets.contains_key(logical) {
+                    bail!(
+                        "capabilities.sql: '$PLATFORM/{logical}' is not bound — set \
+                         platform_secrets: {{{logical}: <global-secret-name>}} in the \
+                         deploy (root) manifest or app manifest"
+                    );
+                }
+                continue;
+            }
+            bail!(
+                "capabilities.sql: '{n}' must be 'local', '$SECRET/<name>' or \
+                 '$PLATFORM/<logical>'"
+            );
         }
         Ok(m)
     }
@@ -146,9 +167,17 @@ build:
         assert_eq!(m.capabilities.sql, vec!["local", "$SECRET/pg1"]);
         let m = Manifest::parse("name: a\n").unwrap();
         assert!(m.capabilities.sql.is_empty());
+        // $PLATFORM grants need a binding
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"$PLATFORM/db\"]\n").is_err());
+        let m = Manifest::parse(
+            "name: a\ncapabilities:\n  sql: [\"$PLATFORM/db\"]\nplatform_secrets:\n  db: arcadia-prod\n",
+        )
+        .unwrap();
+        assert_eq!(m.platform_secrets["db"], "arcadia-prod");
         // plain names no longer resolve anywhere — invalid
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [sl]\n").is_err());
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"$SECRET/ \"]\n").is_err());
+        assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"$PLATFORM/ \"]\n").is_err());
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\"\"]\n").is_err());
         assert!(Manifest::parse("name: a\ncapabilities:\n  sql: [\" \"]\n").is_err());
     }

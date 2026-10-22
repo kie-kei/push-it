@@ -91,30 +91,38 @@ pub struct SqlCtx {
     pub(crate) pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<Backend>>>>,
 }
 /// Resolve `capabilities.sql` grants into (allowed names, name → dsn).
-/// Grants are `local` (reserved, app-scoped sqlite) or `$SECRET/<name>`
-/// pulling the DSN from app secret `<name>` (via `lookup`).
+/// Grants: `local` (reserved, app-scoped sqlite), `$SECRET/<name>` (DSN
+/// from app secret `<name>` via `app_secret`), `$PLATFORM/<logical>`
+/// (DSN from a platform-wide global secret, resolved via `platform_secret`
+/// which applies the deploy-time binding logical → global name).
 pub fn resolve_grants(
     grants: &[String],
     app: &str,
-    mut lookup: impl FnMut(&str) -> Option<String>,
+    mut app_secret: impl FnMut(&str) -> Option<String>,
+    mut platform_secret: impl FnMut(&str) -> Option<String>,
 ) -> Result<(Vec<String>, HashMap<String, String>)> {
     let mut allowed = Vec::with_capacity(grants.len());
     let mut dsns = HashMap::new();
     for grant in grants {
-        match grant.strip_prefix("$SECRET/") {
-            Some(key) => {
-                let dsn = lookup(key).with_context(|| {
-                    format!("capabilities.sql: secret '{key}' not set for app '{app}' (pushit secret set {app} {key} <dsn>)")
-                })?;
-                dsns.insert(key.to_string(), dsn);
-                allowed.push(key.to_string());
-            }
-            None if grant == "local" => allowed.push(grant.clone()),
-            None => bail!(
-                "capabilities.sql: '{grant}' must be 'local' or '$SECRET/<name>' \
-                 (pushit secret set {app} {grant} <dsn>)"
-            ),
+        if grant == "local" {
+            allowed.push(grant.clone());
+            continue;
         }
+        let (prefix, lookup, hint) = if let Some(key) = grant.strip_prefix("$SECRET/") {
+            ("$SECRET/", &mut app_secret as &mut dyn FnMut(&str) -> Option<String>, format!("pushit secret set {app} {key} <dsn>"))
+        } else if let Some(logical) = grant.strip_prefix("$PLATFORM/") {
+            ("$PLATFORM/", &mut platform_secret as &mut dyn FnMut(&str) -> Option<String>, format!("bind platform_secrets: {{{logical}: <global-name>}} and set the global secret (pushit secret set --global <global-name> <dsn>)"))
+        } else {
+            bail!(
+                "capabilities.sql: '{grant}' must be 'local', '$SECRET/<name>' or '$PLATFORM/<logical>'"
+            );
+        };
+        let key = &grant[prefix.len()..];
+        let dsn = lookup(key).with_context(|| {
+            format!("capabilities.sql: no value for '{grant}' of app '{app}' ({hint})")
+        })?;
+        dsns.insert(key.to_string(), dsn);
+        allowed.push(key.to_string());
     }
     Ok((allowed, dsns))
 }
@@ -586,19 +594,32 @@ mod tests {
         let grants = vec![
             "local".to_string(),
             "$SECRET/arcadia-db".to_string(),
+            "$PLATFORM/shared".to_string(),
         ];
-        let (allowed, dsns) = resolve_grants(&grants, "myapp", |k| {
-            (k == "arcadia-db").then(|| "postgres://u:p@h/db".to_string())
-        })
+        let (allowed, dsns) = resolve_grants(
+            &grants,
+            "myapp",
+            |k| (k == "arcadia-db").then(|| "postgres://u:p@h/db".to_string()),
+            |l| (l == "shared").then(|| "postgres://u:p@shared/db".to_string()),
+        )
         .unwrap();
-        assert_eq!(allowed, ["local", "arcadia-db"]);
+        assert_eq!(allowed, ["local", "arcadia-db", "shared"]);
         assert_eq!(dsns["arcadia-db"], "postgres://u:p@h/db");
+        assert_eq!(dsns["shared"], "postgres://u:p@shared/db");
     }
 
     #[test]
     fn resolve_grants_rejects_plain_names() {
-        let err = resolve_grants(&["plain-db".to_string()], "myapp", |_| None).unwrap_err();
-        assert!(err.to_string().contains("must be 'local' or '$SECRET/<name>'"));
+        let err = resolve_grants(&["plain-db".to_string()], "myapp", |_| None, |_| None)
+            .unwrap_err();
+        assert!(err.to_string().contains("must be 'local', '$SECRET/<name>' or '$PLATFORM/<logical>'"));
+    }
+
+    #[test]
+    fn resolve_grants_platform_unbound() {
+        let err = resolve_grants(&["$PLATFORM/db".to_string()], "myapp", |_| None, |_| None)
+            .unwrap_err();
+        assert!(err.to_string().contains("no value for '$PLATFORM/db'"));
     }
 
     #[test]

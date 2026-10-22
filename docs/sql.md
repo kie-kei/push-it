@@ -59,7 +59,29 @@ pushit secret set myapp arcadia-db 'postgres://user:pass@arcadiamusicalliance.co
 ```
 
 The guest opens `connection.open("arcadia-db")`; the controller reads the
-secret and connects itself — the DSN never reaches the component.
+secret and connects itself — the DSN never reaches the component; or
+- `$PLATFORM/<logical>` — the DSN lives in a *platform-wide* secret shared
+  by many apps. The app repo uses its own stable logical name; the deployer
+  binds it to the platform's global secret name at deploy time (root
+  manifest), so the repo never hardcodes platform naming:
+
+  ```yaml
+  # root pushit.yaml (deploy side)
+  apps:
+    myapp:
+      repo: git@…
+      env: {}
+      platform_secrets:
+        db: arcadia-prod   # global secret name on this platform
+  ```
+
+  ```bash
+  pushit secret global set arcadia-prod='postgres://user:pass@db.internal:5432/arcadia'
+  ```
+
+  Several apps can bind their logical `db` to the same global secret.
+  `$PLATFORM/<x>` without a binding fails manifest validation at deploy.
+
 Anything else in `capabilities.sql` fails manifest validation.
 
 `connection.open(name)` succeeds only if `name` is in `capabilities.sql`
