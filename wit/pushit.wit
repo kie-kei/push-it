@@ -1,0 +1,9 @@
+package pushit:app@0.1.0;
+
+/// Platform app world: the component is an HTTP handler invoked by the
+/// controller. Imports are granted selectively via `capabilities` in
+/// pushit.yaml; the host links only what is allowed.
+world app {
+    include wasi:http/imports@0.2.0;
+    export wasi:http/incoming-handler@0.2.0;
+}
