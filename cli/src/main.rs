@@ -27,6 +27,19 @@ struct Cli {
     cmd: Cmd,
 }
 
+#[derive(Args)]
+struct SkillInstallArgs {
+    /// Install into ./.agents/skill/pushit instead of the home directory.
+    #[arg(long)]
+    project: bool,
+}
+
+#[derive(Subcommand)]
+enum SkillCmd {
+    /// Install the skill for coding agents (~/.agents/skill/pushit, or --project).
+    Install(SkillInstallArgs),
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Compare a root manifest + app repos against live state (no changes).
@@ -35,8 +48,11 @@ enum Cmd {
         #[arg(long, default_value = "pushit.yaml")]
         manifest: PathBuf,
     },
-    /// Print the PushIt app development guide (for agents and humans).
-    Skill,
+    /// Print the PushIt app development guide, or install it for agents.
+    Skill {
+        #[command(subcommand)]
+        cmd: Option<SkillCmd>,
+    },
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
     Build(BuildArgs),
     /// Run the app on a local standalone runtime (no controller needed).
@@ -132,10 +148,13 @@ fn main() -> Result<()> {
     let client = client(&cli)?;
     let server = cli.server.trim_end_matches('/').to_string();
     match cli.cmd {
-        Cmd::Skill => {
-            print!("{}", include_str!("../../skills/pushit-app/SKILL.md"));
-            Ok(())
-        }
+        Cmd::Skill { cmd } => match cmd {
+            None => {
+                print!("{}", include_str!("../../skills/pushit-app/SKILL.md"));
+                Ok(())
+            }
+            Some(SkillCmd::Install(a)) => skill_install(&a),
+        },
         Cmd::Plan { manifest } => plan_root(
             &server,
             &client,
@@ -717,6 +736,36 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
             }
         },
     }
+    Ok(())
+}
+
+const SKILL_MD: &str = include_str!("../../skills/pushit-app/SKILL.md");
+
+fn skill_install(a: &SkillInstallArgs) -> Result<()> {
+    let target = if a.project {
+        PathBuf::from(".agents/skill/pushit/SKILL.md")
+    } else {
+        std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(".agents/skill/pushit/SKILL.md"))
+            .ok_or_else(|| anyhow!("HOME is not set; use --project"))?
+    };
+    print!(
+        "install pushit skill to {}?{} [y/N] ",
+        target.display(),
+        if target.exists() { " (will overwrite)" } else { "" }
+    );
+    std::io::Write::flush(&mut std::io::stderr())?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+        println!("aborted");
+        return Ok(());
+    }
+    if let Some(dir) = target.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(&target, SKILL_MD)?;
+    println!("installed: {}", target.display());
     Ok(())
 }
 
