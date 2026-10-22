@@ -11,13 +11,14 @@ services:
     ports:
       - "9100:9100"
     environment:
-      PUSHIT_DEV: "1"            # dev mode: CLI works with --dev, no OIDC needed
+      # scenario switch comes from .env: PUSHIT_DEV=1 → dev, PUSHIT_DEV= (empty) → OIDC.
+      # NOTE: no colon in ${PUSHIT_DEV-1} — empty must stay empty (scenario 2).
+      PUSHIT_DEV: ${PUSHIT_DEV-1}
       PUSHIT_BASE_DOMAIN: ${PUSHIT_BASE_DOMAIN:-localhost}
-      # for a real Keycloak (external or edge profile), switch to OIDC:
-      # PUSHIT_DEV: ""            # remove dev mode
-      # PUSHIT_OIDC_ISSUER: https://auth.example.com/realms/pushit
-      # PUSHIT_OIDC_CLIENT_ID: pushit-platform
-      # PUSHIT_OIDC_CLIENT_SECRET: ${PUSHIT_OIDC_CLIENT_SECRET}
+      PUSHIT_OIDC_ISSUER: ${PUSHIT_OIDC_ISSUER:-}
+      PUSHIT_OIDC_CLIENT_ID: ${PUSHIT_OIDC_CLIENT_ID:-pushit-platform}
+      PUSHIT_OIDC_CLIENT_SECRET: ${PUSHIT_OIDC_CLIENT_SECRET:-}
+      PUSHIT_SESSION_KEY: ${PUSHIT_SESSION_KEY:-}
     volumes:
       - controller_data:/data
 
@@ -28,6 +29,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # where auth.* requests go: local keycloak service or your external KC
+      KC_UPSTREAM: ${KC_UPSTREAM:-keycloak:8080}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

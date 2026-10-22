@@ -3,9 +3,11 @@
 	local_certs
 }
 
-# Keycloak
+# Keycloak — upstream comes from KC_UPSTREAM env (compose injects it;
+# default is the local `keycloak` service, set it to your external KC URL
+# for the edge-external scenario)
 auth.apps.internal.lan {
-	reverse_proxy keycloak:8080
+	reverse_proxy {$KC_UPSTREAM}
 }
 
 # All app traffic (incl. hub.apps.internal.lan) → controller.
