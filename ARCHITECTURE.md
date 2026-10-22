@@ -136,7 +136,7 @@ pushit deploy (на машине разработчика или в CI):
 | env/secrets через хост | — | env подаётся при instantiate, секреты из SQLite | **MVP** |
 | `wasi:blobstore` | Phase 1 (draft, `0.2.0-draft`) | свой host поверх S3-клиента: get/put/list/stream → бакет из манифеста. Креды живут у хоста, компоненту не нужны | Следующий шаг (S3-кейс) |
 | `wasi:kv-store` | Phase 2 | host → Redis/Redis-кластер при появлении потребности | По потребности |
-| `wasi:sql` | Phase 1 | host → ClickHouse/Postgres; креды у хоста | По потребности (CH-кейс) |
+| `wasi:sql` | Phase 1 | **Реализовано**: `sqlx::AnyPool` (postgres/mysql/sqlite) + ClickHouse через HTTP-эндпоинт; `capabilities.sql: [name]` → `databases.yaml` (name→DSN), креды у хоста | **Done** |
 | `wasi:logging` | Phase 1 | host → per-app лог-файл | Дёшево, можно сразу |
 | `wasi:messaging` | Phase 2 | — | Не планируется до запроса |
 
