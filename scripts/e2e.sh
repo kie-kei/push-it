@@ -12,7 +12,10 @@ source ~/.cargo/env
 PUSHIT_DATA=/tmp/pushit-e2e
 PUSHIT_BIN="$ROOT/target/debug/pushit"
 CONTROLLER_BIN="$ROOT/target/debug/pushit-controller"
-SERVER=http://localhost:9100
+# Port must be free; override PUSHIT_E2E_PORT if 9100 is taken (e.g. by a
+# running docker compose controller).
+PUSHIT_E2E_PORT="${PUSHIT_E2E_PORT:-9100}"
+SERVER="http://localhost:$PUSHIT_E2E_PORT"
 APP=hello
 APP_HOST=hello.localhost
 CONTROLLER_PID=""
@@ -24,6 +27,9 @@ fail() { echo "FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 cleanup() {
   if [ -n "$CONTROLLER_PID" ] && kill -0 "$CONTROLLER_PID" 2>/dev/null; then
     kill "$CONTROLLER_PID" 2>/dev/null
+    sleep 0.5
+    # SIGTERM may be swallowed by the tokio runtime — force
+    kill -9 "$CONTROLLER_PID" 2>/dev/null
     wait "$CONTROLLER_PID" 2>/dev/null
   fi
 }
@@ -56,19 +62,22 @@ mkdir -p "$PUSHIT_DATA"
 printf 'files: fs://%s/blobs\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/blobstores.yaml"
 
 echo "==> start controller"
-PUSHIT_DEV=1 PUSHIT_DATA="$PUSHIT_DATA" "$CONTROLLER_BIN" >/tmp/pushit-e2e-controller.log 2>&1 &
+PUSHIT_DEV=1 PUSHIT_DATA="$PUSHIT_DATA" PUSHIT_BIND="0.0.0.0:$PUSHIT_E2E_PORT" "$CONTROLLER_BIN" >/tmp/pushit-e2e-controller.log 2>&1 &
 CONTROLLER_PID=$!
 
-echo "==> wait for :9100"
+echo "==> wait for :$PUSHIT_E2E_PORT"
 READY=0
 for _ in $(seq 1 60); do
-  if curl -sf -o /dev/null "$SERVER/api/apps" -H 'X-Pushit-Dev: 1' || curl -s -o /dev/null -w '%{http_code}' "$SERVER/" | grep -qE '200|401|403|404'; then
+  # must see OUR controller's startup line — the port may be occupied by
+  # another instance (e.g. docker), whose /api would false-positive the curl
+  if grep -q "listening on" /tmp/pushit-e2e-controller.log 2>/dev/null; then
     READY=1; break
   fi
+  kill -0 "$CONTROLLER_PID" 2>/dev/null || { echo "controller died: $(tail -3 /tmp/pushit-e2e-controller.log)"; break; }
   sleep 1
 done
 if [ "$READY" -eq 1 ]; then
-  pass "controller listening on :9100"
+  pass "controller listening on :$PUSHIT_E2E_PORT"
 else
   fail "controller did not start (see /tmp/pushit-e2e-controller.log)"
   tail -20 /tmp/pushit-e2e-controller.log
@@ -76,24 +85,25 @@ else
 fi
 
 echo "==> secret set"
-if "$PUSHIT_BIN" --dev secret set "$APP" HELLO_SECRET=secret123; then
+if "$PUSHIT_BIN" --dev --server "$SERVER" secret set "$APP" HELLO_SECRET=secret123; then
   pass "secret set"
 else
   fail "secret set"
 fi
 
 echo "==> deploy"
-if (cd examples/hello && "$PUSHIT_BIN" --dev deploy); then
+if (cd examples/hello && "$PUSHIT_BIN" --dev --server "$SERVER" deploy); then
   pass "deploy"
 else
   fail "deploy"
 fi
 
 echo "==> GET / (static UI)"
-if curl -sf -H "Host: $APP_HOST" "$SERVER/" | grep -q '<title>hello</title>'; then
+STATIC_OUT="$(curl -s -w '\n%{http_code}' -H "Host: $APP_HOST" "$SERVER/" || true)"
+if echo "$STATIC_OUT" | grep -q '<title>hello</title>'; then
   pass "index.html served"
 else
-  fail "index.html served"
+  fail "index.html served — got: $(echo "$STATIC_OUT" | tail -c 250)"
 fi
 
 echo "==> GET /_fn/hello (wasm handler)"
@@ -143,14 +153,14 @@ else
 fi
 
 echo "==> second deploy (create previous revision)"
-if (cd examples/hello && "$PUSHIT_BIN" --dev deploy >/dev/null); then
+if (cd examples/hello && "$PUSHIT_BIN" --dev --server "$SERVER" deploy >/dev/null); then
   pass "second deploy"
 else
   fail "second deploy"
 fi
 
 echo "==> rollback"
-if "$PUSHIT_BIN" --dev rollback "$APP"; then
+if "$PUSHIT_BIN" --dev --server "$SERVER" rollback "$APP"; then
   pass "rollback"
 else
   fail "rollback"
