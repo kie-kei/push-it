@@ -1,5 +1,7 @@
 # PushIt controller — WASM runtime in-process, no child processes/sockets needed.
-FROM rust:1-slim AS build
+# Builder = full rust image (buildpack-deps): aws-lc-sys needs cmake+perl,
+# which rust:1-slim does not ship.
+FROM rust:1 AS build
 WORKDIR /src
 # manifest layer first for dep caching
 COPY Cargo.toml Cargo.lock ./
