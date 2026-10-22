@@ -27,6 +27,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Compare a root manifest + app repos against live state (no changes).
+    Plan {
+        /// Path to the root pushit.yaml with an `apps:` section.
+        #[arg(long, default_value = "pushit.yaml")]
+        manifest: PathBuf,
+    },
     /// Print the PushIt app development guide (for agents and humans).
     Skill,
     /// Run manifest build commands (build.fn / build.ui) and verify artifacts.
@@ -112,6 +118,15 @@ fn main() -> Result<()> {
             print!("{}", include_str!("../../skills/pushit-app/SKILL.md"));
             Ok(())
         }
+        Cmd::Plan { manifest } => plan_root(
+            &server,
+            &client,
+            &DeployArgs {
+                manifest,
+                wasm: None,
+                dist: None,
+            },
+        ),
         Cmd::Build(a) => build(&a),
         Cmd::Init(a) => init(a),
         Cmd::Deploy(a) => deploy(&server, &client, a),
@@ -357,6 +372,165 @@ fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
         clone.arg(repo).arg(dir);
         run(clone)
     }
+}
+
+/// `pushit plan`: diff root manifest (+ synced repos) against live state.
+/// Read-only: create / env-drift / missing-secrets / orphan detection.
+fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
+    let manifest_text =
+        fs::read_to_string(&args.manifest).with_context(|| format!("read {}", args.manifest.display()))?;
+    let manifest: serde_yaml::Value = serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
+    let apps = manifest
+        .get("apps")
+        .and_then(|v| v.as_mapping())
+        .ok_or_else(|| anyhow!("plan: manifest must be a root manifest with an `apps:` section"))?;
+    let base = args.manifest.parent().unwrap_or_else(|| Path::new("."));
+    let cache = base.join(".pushit-cache");
+    fs::create_dir_all(&cache)?;
+
+    let live: serde_json::Value = client
+        .get(url(server, "/api/apps"))
+        .send()?
+        .error_for_status()?
+        .json()?;
+    let live_names: Vec<String> = live
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.get("name").and_then(|v| v.as_str()))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // orphan detection runs after the loop: compare against real app names
+    // (root keys are cache dir names and may differ from app names)
+
+    let mut drift = 0usize;
+    let mut expected: Vec<String> = Vec::new();
+    for (key, cfg) in apps {
+        let key = key.as_str().ok_or_else(|| anyhow!("apps: keys must be strings"))?;
+        let repo = cfg
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("apps.{key}: missing `repo`"))?;
+        let git_ref = cfg.get("ref").and_then(|v| v.as_str());
+        let inner = cfg
+            .get("manifest")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pushit.yaml");
+        let dir = cache.join(key);
+        print!("{key}: ");
+        if let Err(e) = sync_repo(repo, git_ref, &dir) {
+            println!("ERROR sync: {e:#}");
+            drift += 1;
+            continue;
+        }
+        let m: serde_yaml::Value = match fs::read_to_string(dir.join(inner))
+            .with_context(|| format!("read {}/{}", key, inner))
+            .and_then(|t| serde_yaml::from_str(&t).context("parse"))
+        {
+            Ok(m) => m,
+            Err(e) => {
+                println!("ERROR manifest: {e:#}");
+                drift += 1;
+                continue;
+            }
+        };
+        let app_name = m
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("apps.{key}: inner manifest missing `name`"))?;
+
+        // env: mandatory at deploy time, same rule as deploy
+        let env = match cfg.get("env") {
+            Some(v) if v.as_mapping().is_some() => v,
+            _ => {
+                println!("ERROR explicit `env:` required (deploy would fail)");
+                drift += 1;
+                continue;
+            }
+        };
+
+        if !live_names.iter().any(|n| n == app_name) {
+            println!("CREATE (new app)");
+            drift += 1;
+            expected.push(app_name.to_string());
+            continue;
+        }
+        expected.push(app_name.to_string());
+
+        // live manifest from controller
+        let detail: serde_json::Value = client
+            .get(url(server, &format!("/api/apps/{app_name}")))
+            .send()?
+            .error_for_status()?
+            .json()?;
+        let live_manifest: serde_yaml::Value =
+            serde_yaml::from_str(detail.get("manifest").and_then(|v| v.as_str()).unwrap_or(""))?;
+
+        // env diff (root env is authoritative)
+        let mut changes: Vec<String> = Vec::new();
+        if let Some(live_env) = live_manifest.get("env").and_then(|v| v.as_mapping()) {
+            for (k, v) in env.as_mapping().unwrap() {
+                if live_env.get(k) != Some(v) {
+                    changes.push(format!("env.{} = {:?}", k.as_str().unwrap_or("?"), v.as_str().unwrap_or("?")));
+                }
+            }
+            for k in live_env.keys() {
+                if env.as_mapping().unwrap().get(k).is_none() {
+                    changes.push(format!("env.{} removed", k.as_str().unwrap_or("?")));
+                }
+            }
+        }
+
+        // declared secrets vs values present on platform
+        let wanted: Vec<&str> = m
+            .get("secrets")
+            .and_then(|v| v.as_sequence())
+            .map(|s| s.iter().filter_map(|x| x.as_str()).collect())
+            .unwrap_or_default();
+        let have: Vec<String> = client
+            .get(url(server, &format!("/api/apps/{app_name}/secrets")))
+            .send()?
+            .error_for_status()?
+            .json::<serde_json::Value>()
+            .ok()
+            .and_then(|j| {
+                j.get("keys").and_then(|k| k.as_array()).map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+        for s in &wanted {
+            if !have.iter().any(|h| h == s) {
+                changes.push(format!("secret {s} missing (pushit secret set {app_name} {s}=…)"));
+            }
+        }
+
+        if changes.is_empty() {
+            println!("up to date (config; code changes deploy as a new revision)");
+        } else {
+            drift += 1;
+            println!("DRIFT:");
+            for c in changes {
+                println!("    {c}");
+            }
+        }
+    }
+    for name in &live_names {
+        if !expected.iter().any(|e| e == name) {
+            println!("~ {name}: live on platform but NOT in root manifest (orphan — delete manually if unintended)");
+        }
+    }
+    if drift == 0 {
+        println!("plan: no drift");
+    } else {
+        println!("plan: {drift} app(s) with changes/errors");
+    }
+    Ok(())
 }
 
 fn deploy_one(

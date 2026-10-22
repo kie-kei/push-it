@@ -39,6 +39,7 @@ apps:
 
 ```bash
 pushit deploy --manifest /path/to/root/pushit.yaml   # one command → all apps
+pushit plan --manifest /path/to/root/pushit.yaml     # read-only diff vs live platform
 ```
 
 Behavior:
@@ -48,6 +49,7 @@ Behavior:
 - **Builds run locally** (the app's own `build.fn`/`build.ui`), never on the server — the controller stays toolchain-free.
 - Apps deploy sequentially; a failed app doesn't stop the rest. Exit code is non-zero and a `N app(s) failed: a, b` line lists them — rerun the same command to retry; redeploys are idempotent.
 - Per-app secrets must exist beforehand (`pushit secret set <app> KEY=V`); deploy fails fast with `missing secrets: …` otherwise.
+- **`pushit plan`** previews without changing anything: per app it reports `CREATE` (new), `DRIFT` (env differs from root manifest, declared secret has no value on the platform), or `up to date`; live apps absent from the root manifest are flagged as orphans. Code changes are invisible to plan — a rebuilt artifact always deploys as a new revision. Run `plan` before `deploy` as the cheap "what will change" check.
 
 ## The app contract
 
