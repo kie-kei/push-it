@@ -109,6 +109,7 @@ If a component imports an interface NOT granted in `capabilities`, the request f
 
 ```bash
 pushit build                          # run build.fn/build.ui + verify artifacts exist
+pushit dev                            # local runtime, no controller (see Testing)
 pushit --dev deploy                   # upload manifest + app.wasm + dist/
 pushit --dev list                     # all apps
 pushit --dev status myapp             # detail + revision history
@@ -118,6 +119,10 @@ pushit --dev secret set myapp K=V     # set/update secret value
 pushit --dev secret ls myapp          # names only
 pushit --dev rollback myapp           # previous revision
 pushit --dev rollback myapp --revision <id>
+pushit profile add prod --server https://pushit.example.com   # register instance
+pushit login --profile prod           # auth flow for that profile
+pushit profile use prod               # make active (default for all commands)
+pushit --profile stage <cmd>          # one-off via another profile, no switching
 ```
 
 `--dev` sends `X-Pushit-Dev: 1` — use against a dev controller (`PUSHIT_DEV=1`). For production: run `pushit login` once (browser → long-lived token in `~/.config/pushit/token`, reused automatically, ~1 year; `--token <jwt>` / `PUSHIT_TOKEN` still work and take precedence), plus `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`). Multiple push-it instances: `pushit profile add <name> --server <url>` → `pushit login --profile <name>` → `pushit profile use <name>` (active), `pushit --profile <name> <cmd>` for a one-off against another instance, `pushit profile list|show|remove` to manage.
