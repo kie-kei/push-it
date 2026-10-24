@@ -75,5 +75,8 @@ jobs:
       - name: Production rejection and real WASM rollback smoke
         run: python3 scripts/security-e2e.py
 
+      - name: In-flight streaming and timed-out WASM version lifetime
+        run: python3 scripts/version-lifetime-e2e.py
+
       - name: CLI portability across isolated local instances
         run: python3 scripts/portability-smoke.py

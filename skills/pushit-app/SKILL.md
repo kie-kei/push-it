@@ -260,6 +260,35 @@ curl http://127.0.0.1:9101/_fn/hello                # exercise the function
 
 This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:sql/blobstore/logging), same `local` sqlite, same 30s timeout — local success is useful evidence, not a guarantee of a successful platform deployment (configuration, capabilities, secrets, auth, and routing can differ). Go to the controller (`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`) to verify the hub, revisions/rollback, or bound secrets; use an authenticated non-dev instance to verify production auth.
 
+## Managing immutable app versions
+
+Every successful deploy creates and immediately activates an immutable version.
+Version IDs are existing revision IDs (not Git SHAs); no migration is needed.
+At most one version is active; zero active versions is valid.
+
+```sh
+pushit version list myapp
+pushit version activate myapp <id>    # any retained version with a snapshot
+pushit version deactivate myapp       # functions + UI/static/config now return 404
+pushit version activate myapp <id>    # reactivation is supported
+pushit version delete myapp <id>      # permanent; inactive only, asks confirmation
+# --yes skips the deletion confirmation; use only with deletion authorization.
+```
+
+Active-version deletion returns 409: first activate another version or deactivate
+the app. An inactive version still used by an in-flight request also returns 409;
+retry after it finishes. Other versions/apps keep serving. Legacy inactive
+versions without manifest snapshots can be deleted, but require redeploy before
+activation. Hub controls expose the same lifecycle; the API is documented in
+`API.md` under “Immutable app versions”. Existing `rollback myapp [--revision ID]`
+and revision history remain compatible.
+
+Activation restores WASM, UI, manifest/env/capabilities and domain atomically,
+**not database/file contents or secret values**. Deactivation/version deletion
+preserve app data, secrets and other versions. Validate old code against current
+data/schema before activation. Metadata deletion is authoritative; filesystem
+cleanup failures are logged and may leave unserved orphan artifact directories.
+
 ## Debugging a deployed app
 
 1. **Deploy-time failure** (400 from `pushit deploy`): read the error — it names the cause: bad manifest, missing secret, component missing `incoming-handler` export, wasm not a component.

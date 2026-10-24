@@ -22,6 +22,8 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 /// Host capabilities for one component invocation, resolved by the caller
 /// (manifest grants + resource maps + the app log sink).
 pub struct HostCaps {
+    /// Optional controller artifact lease; standalone dev has no version deletion.
+    pub artifact_pin: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
     pub allow_http_out: bool,
     pub data_dir: PathBuf,
     pub sql_allowed: Vec<String>,
@@ -132,6 +134,13 @@ impl Runtime {
         Ok(pre)
     }
 
+    /// Drop cached handles for exactly one deleted version. Running calls own
+    /// their own Arcs; app-local data is deliberately outside these caches.
+    pub fn evict(&self, dir: &Path) {
+        self.pre.lock().remove(dir);
+        self.sql_pools.lock().retain(|(path, _, _), _| path != dir);
+    }
+
     /// Invoke incoming-handler for one request. `env` is manifest env +
     /// secrets (already resolved). `app_name` is the app name for `local` DB resolution.
     pub async fn call(
@@ -144,6 +153,7 @@ impl Runtime {
         req: hyper::Request<Full<Bytes>>,
     ) -> Result<CallResult> {
         let pre = self.load(dir)?;
+        let artifact_pin = caps.artifact_pin;
         let stdout = MemoryOutputPipe::new(1 << 20);
         let stderr = MemoryOutputPipe::new(1 << 20);
         let mut wb = WasiCtxBuilder::new();
@@ -183,6 +193,9 @@ impl Runtime {
         let out = store.data_mut().new_response_outparam(tx)?;
 
         let task = tokio::task::spawn(async move {
+            // A guest may outlive its response headers/body or an HTTP timeout.
+            // Keep its version pinned until the Store and guest actually stop.
+            let _artifact_pin = artifact_pin;
             let proxy = pre.instantiate_async(&mut store).await?;
             proxy
                 .wasi_http_incoming_handler()

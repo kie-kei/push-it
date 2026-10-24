@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use crate::auth::{Auth, User};
 use crate::config::Config;
-use crate::db::{App, Db, Revision};
+use crate::db::{App, Db, DeleteVersion, Revision};
 use crate::logs::LogStore;
 use crate::manifest::Manifest;
 use crate::runtime::Runtime;
 use crate::secrets::Secrets;
+use http_body_util::BodyExt;
 
 pub struct AppState {
     pub cfg: Config,
@@ -42,6 +43,16 @@ pub fn router(state: S) -> Router {
         )
         .route("/api/apps/{name}/deploy", post(api_deploy))
         .route("/api/apps/{name}/rollback", post(api_rollback))
+        .route("/api/apps/{name}/versions", get(api_versions))
+        .route(
+            "/api/apps/{name}/versions/{version}/activate",
+            post(api_activate_version),
+        )
+        .route(
+            "/api/apps/{name}/versions/{version}",
+            axum::routing::delete(api_delete_version),
+        )
+        .route("/api/apps/{name}/deactivate", post(api_deactivate))
         .route("/api/apps/{name}/secrets", get(api_list_secrets))
         .route(
             "/api/apps/{name}/secrets/{key}",
@@ -143,10 +154,154 @@ async fn api_delete_app(
     require_api_user(&s, &headers).await?;
     // Delete only directories belonging to the removed DB snapshot. A concurrent
     // deployment may already have published a new, uniquely named directory.
-    for dir in s.db.delete_app(&name).map_err(err500)? {
-        let _ = std::fs::remove_dir_all(dir);
+    for dir in
+        s.db.delete_app(&name)
+            .map_err(|e| (StatusCode::CONFLICT, format!("{e:#}")).into_response())?
+    {
+        cleanup_version(&s, &dir);
     }
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Cookie-authenticated browser mutations must be non-simple requests. With
+/// no CORS permission, another origin (including a sibling app) cannot send this
+/// header. Bearer clients do not rely on ambient browser credentials.
+async fn require_version_mutation(s: &AppState, headers: &HeaderMap) -> Result<User, Response> {
+    let user = require_api_user(s, headers).await?;
+    if !s.auth.dev_bypass(headers) && s.auth.user_from_headers(headers).is_some() {
+        if headers.get("x-pushit-csrf").and_then(|h| h.to_str().ok()) != Some("1") {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "browser version mutations require X-PushIt-CSRF: 1",
+            )
+                .into_response());
+        }
+        if let Some(origin) = headers.get(header::ORIGIN) {
+            let same_origin = origin
+                .to_str()
+                .ok()
+                .and_then(|v| v.parse::<http::Uri>().ok())
+                .is_some_and(|origin| {
+                    matches!(origin.scheme_str(), Some("http" | "https"))
+                        && origin.authority().is_some_and(|authority| {
+                            authority
+                                .as_str()
+                                .eq_ignore_ascii_case(auth_host_of(headers))
+                        })
+                });
+            if !same_origin {
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    "browser version mutation origin must match Host",
+                )
+                    .into_response());
+            }
+        }
+    }
+    Ok(user)
+}
+
+fn cleanup_version(s: &AppState, dir: &str) {
+    s.runtime.evict(std::path::Path::new(dir));
+    if let Err(error) = std::fs::remove_dir_all(dir) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(%error, %dir, "version removed from database but artifact cleanup failed");
+        }
+    }
+}
+
+async fn api_versions(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Response, Response> {
+    require_api_user(&s, &headers).await?;
+    if s.db.get_app(&name).map_err(err500)?.is_none() {
+        return Err((StatusCode::NOT_FOUND, "no such app").into_response());
+    }
+    let versions: Vec<_> = s
+        .db
+        .revisions(&name)
+        .map_err(err500)?
+        .into_iter()
+        .map(|r| serde_json::json!({"id": r.id, "created_at": r.created_at, "active": r.active}))
+        .collect();
+    Ok(axum::Json(versions).into_response())
+}
+
+async fn api_deactivate(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Response, Response> {
+    require_version_mutation(&s, &headers).await?;
+    if !s.db.deactivate(&name).map_err(err500)? {
+        return Err((StatusCode::NOT_FOUND, "no such app").into_response());
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+async fn api_delete_version(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Response, Response> {
+    require_version_mutation(&s, &headers).await?;
+    // DB snapshot + per-artifact busy-check are serialized with reader pins.
+    match s.db.delete_version(&name, &version).map_err(err500)? {
+        DeleteVersion::Missing => Err((StatusCode::NOT_FOUND, "no such version").into_response()),
+        DeleteVersion::Busy => Err((
+            StatusCode::CONFLICT,
+            "version has in-flight requests; retry deletion after they finish",
+        )
+            .into_response()),
+        DeleteVersion::Active => Err((
+            StatusCode::CONFLICT,
+            "cannot delete the active version; deactivate it or activate another version first",
+        )
+            .into_response()),
+        DeleteVersion::Deleted(dir) => {
+            cleanup_version(&s, &dir);
+            Ok(StatusCode::NO_CONTENT.into_response())
+        }
+    }
+}
+
+async fn api_activate_version(
+    State(s): State<S>,
+    headers: HeaderMap,
+    Path((name, version)): Path<(String, String)>,
+) -> Result<Response, Response> {
+    require_version_mutation(&s, &headers).await?;
+    activate_version(&s, &name, &version)?;
+    Ok(axum::Json(serde_json::json!({"app": name, "version": version})).into_response())
+}
+
+fn activate_version(s: &AppState, name: &str, version: &str) -> Result<(), Response> {
+    let (snapshot, _artifacts) =
+        s.db.pin_revision(name, version)
+            .map_err(err500)?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "no such version").into_response())?;
+    let manifest = snapshot.manifest.as_deref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "legacy version has no manifest; redeploy the desired version before activation",
+        )
+            .into_response()
+    })?;
+    let manifest = Manifest::parse(manifest).map_err(err400)?;
+    validate_manifest_secrets(s, name, &manifest).map_err(err400)?;
+    if !std::path::Path::new(&snapshot.artifact_dir)
+        .join("app.wasm")
+        .is_file()
+    {
+        return Err((StatusCode::BAD_REQUEST, "version artifact is missing").into_response());
+    }
+    s.runtime
+        .load(std::path::Path::new(&snapshot.artifact_dir))
+        .map_err(err400)?;
+    s.db.activate(name, version).map_err(err400)?;
+    Ok(())
 }
 
 async fn api_deploy(
@@ -453,29 +608,7 @@ async fn api_rollback(
                 .ok_or_else(|| (StatusCode::BAD_REQUEST, "no previous revision").into_response())?
         }
     };
-    let snapshot =
-        s.db.revision(&name, &rev)
-            .map_err(err500)?
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, "no such revision").into_response())?;
-    let manifest = snapshot.manifest.as_deref().ok_or_else(|| {
-        (
-            StatusCode::BAD_REQUEST,
-            "legacy revision has no manifest; redeploy it before rollback",
-        )
-            .into_response()
-    })?;
-    let manifest = Manifest::parse(manifest).map_err(err400)?;
-    validate_manifest_secrets(&s, &name, &manifest).map_err(err400)?;
-    if !std::path::Path::new(&snapshot.artifact_dir)
-        .join("app.wasm")
-        .is_file()
-    {
-        return Err((StatusCode::BAD_REQUEST, "revision artifact is missing").into_response());
-    }
-    s.runtime
-        .load(std::path::Path::new(&snapshot.artifact_dir))
-        .map_err(err400)?;
-    s.db.activate(&name, &rev).map_err(err400)?;
+    activate_version(&s, &name, &rev)?;
     if let Err(error) = s
         .logs
         .append(&name, format!("rolled back to {rev}\n").as_bytes())
@@ -667,6 +800,7 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
     HubApp {
         app: &app,
         revs: &revs,
+        active: revs.iter().any(|r| r.active),
         logs,
         secrets,
     }
@@ -676,7 +810,7 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
 }
 
 async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, _prefix: &str) -> Response {
-    let Some((app, rev)) = s.db.active_app_by_domain(host).ok().flatten() else {
+    let Some((app, rev, artifacts)) = s.db.pin_active_by_domain(host).ok().flatten() else {
         return (StatusCode::NOT_FOUND, "no app for this host").into_response();
     };
     let uri = req.uri().clone();
@@ -685,9 +819,25 @@ async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, _prefix: &st
         Err(r) => return r,
     };
     if uri.path().starts_with("/_fn/") || uri.path() == "/_fn" {
-        return call_fn(s, &app, &rev, user, req).await;
+        let artifacts = Arc::new(artifacts);
+        let response = call_fn(s, &app, &rev, user, req, artifacts.clone()).await;
+        // Keep the pin through streaming response consumption, not merely until
+        // the handler returns its headers. Preserve frames (including trailers).
+        return pin_response(response, artifacts);
     }
     serve_static(&rev, &uri)
+}
+
+fn pin_response(
+    response: Response,
+    artifacts: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
+) -> Response {
+    let (parts, body) = response.into_parts();
+    let pinned = body.map_frame(move |frame| {
+        let _ = &artifacts;
+        frame
+    });
+    Response::from_parts(parts, Body::new(pinned))
 }
 
 fn serve_static(rev: &Revision, uri: &http::Uri) -> Response {
@@ -736,6 +886,7 @@ async fn call_fn(
     rev: &Revision,
     user: User,
     req: Request<Body>,
+    artifact_pin: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
 ) -> Response {
     let Ok(manifest) = Manifest::parse(&app.manifest) else {
         return err500(anyhow::anyhow!("stored manifest fails to parse"));
@@ -798,6 +949,7 @@ async fn call_fn(
         Err(e) => return err500(e),
     };
     let caps = crate::runtime::HostCaps {
+        artifact_pin: Some(artifact_pin),
         allow_http_out: manifest.http_out(),
         data_dir: s.cfg.data_dir.clone(),
         sql_allowed,
@@ -860,6 +1012,31 @@ struct HubIndex<'a> {
 struct HubApp<'a> {
     app: &'a App,
     revs: &'a [crate::db::Revision],
+    active: bool,
     logs: Vec<String>,
     secrets: Vec<String>,
+}
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::*;
+
+    #[test]
+    fn response_body_retains_pin_independently_of_guest_task_until_dropped() {
+        let db = Db::open(std::path::Path::new(":memory:")).unwrap();
+        db.deploy_revision("a", "r1", "/a/r1", "a.localhost", "name: a")
+            .unwrap();
+        let (_, _, pin) = db.pin_active_by_domain("a.localhost").unwrap().unwrap();
+        let body = Body::from_stream(futures::stream::pending::<Result<Bytes, Infallible>>());
+        let response = pin_response(Response::new(body), Arc::new(pin));
+        db.deploy_revision("a", "r2", "/a/r2", "a.localhost", "name: a")
+            .unwrap();
+        // No guest exists in this test: only the streaming response owns a pin.
+        assert_eq!(db.delete_version("a", "r1").unwrap(), DeleteVersion::Busy);
+        drop(response);
+        assert_eq!(
+            db.delete_version("a", "r1").unwrap(),
+            DeleteVersion::Deleted("/a/r1".into())
+        );
+    }
 }

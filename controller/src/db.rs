@@ -2,12 +2,24 @@ use anyhow::{bail, Context, Result};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
+    // The registry mutex serializes snapshot+pin with deletion+busy-check.
+    // Never held across await; weak entries do not retain deleted versions.
+    artifacts: Arc<Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum DeleteVersion {
+    Missing,
+    Active,
+    Busy,
+    Deleted(String),
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -102,7 +114,50 @@ impl Db {
         tx.commit()?;
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
+            artifacts: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    fn artifact_lock(
+        locks: &mut HashMap<String, Weak<tokio::sync::RwLock<()>>>,
+        dir: &str,
+    ) -> Arc<tokio::sync::RwLock<()>> {
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(dir).and_then(Weak::upgrade) {
+            return lock;
+        }
+        let lock = Arc::new(tokio::sync::RwLock::new(()));
+        locks.insert(dir.to_owned(), Arc::downgrade(&lock));
+        lock
+    }
+
+    pub fn pin_active_by_domain(
+        &self,
+        domain: &str,
+    ) -> Result<Option<(App, Revision, tokio::sync::OwnedRwLockReadGuard<()>)>> {
+        let mut locks = self.artifacts.lock();
+        let Some((app, revision)) = self.active_app_by_domain(domain)? else {
+            return Ok(None);
+        };
+        let pin = Self::artifact_lock(&mut locks, &revision.artifact_dir)
+            .try_read_owned()
+            .context("version artifacts are being removed; retry")?;
+        Ok(Some((app, revision, pin)))
+    }
+
+    pub fn pin_revision(
+        &self,
+        app: &str,
+        id: &str,
+    ) -> Result<Option<(Revision, tokio::sync::OwnedRwLockReadGuard<()>)>> {
+        let mut locks = self.artifacts.lock();
+        let Some(revision) = self.revision(app, id)? else {
+            return Ok(None);
+        };
+        let pin = Self::artifact_lock(&mut locks, &revision.artifact_dir)
+            .try_read_owned()
+            .context("version artifacts are being removed; retry")?;
+        Ok(Some((revision, pin)))
     }
 
     fn c(&self) -> parking_lot::MutexGuard<'_, Connection> {
@@ -145,7 +200,12 @@ impl Db {
                     domain: r.get(1)?,
                     revision: r.get(2)?,
                     deployed_at: r.get(3)?,
-                    status: "ok".into(),
+                    status: if r.get::<_, String>(2)?.is_empty() {
+                        "inactive"
+                    } else {
+                        "ok"
+                    }
+                    .into(),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -153,6 +213,7 @@ impl Db {
     }
 
     pub fn delete_app(&self, name: &str) -> Result<Vec<String>> {
+        let mut locks = self.artifacts.lock();
         let mut conn = self.c();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let dirs = {
@@ -162,6 +223,11 @@ impl Db {
                 .collect::<rusqlite::Result<Vec<String>>>()?;
             dirs
         };
+        let _pins = dirs
+            .iter()
+            .map(|dir| Self::artifact_lock(&mut locks, dir).try_write_owned())
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("app has in-flight requests; retry deletion after they finish")?;
         tx.execute("DELETE FROM revisions WHERE app=?1", params![name])?;
         tx.execute("DELETE FROM secrets WHERE app=?1", params![name])?;
         tx.execute("DELETE FROM apps WHERE name=?1", params![name])?;
@@ -206,6 +272,57 @@ impl Db {
         Ok(())
     }
 
+    /// Zero active versions is a valid app state; retain its configuration,
+    /// secrets, data and all immutable versions for later activation.
+    pub fn deactivate(&self, app: &str) -> Result<bool> {
+        let mut conn = self.c();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM apps WHERE name=?1)",
+            params![app],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE revisions SET active=0 WHERE app=?1 AND active=1",
+            params![app],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Check and remove in the same write transaction, so activation/deploy can
+    /// never race the active-version guard. No snapshot is required for deletion.
+    pub fn delete_version(&self, app: &str, id: &str) -> Result<DeleteVersion> {
+        let mut locks = self.artifacts.lock();
+        let mut conn = self.c();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let found: Option<(String, bool)> = tx
+            .query_row(
+                "SELECT artifact_dir,active FROM revisions WHERE app=?1 AND id=?2",
+                params![app, id],
+                |r| Ok((r.get(0)?, r.get::<_, i32>(1)? != 0)),
+            )
+            .optional()?;
+        let Some((dir, active)) = found else {
+            return Ok(DeleteVersion::Missing);
+        };
+        if active {
+            return Ok(DeleteVersion::Active);
+        }
+        let Ok(_pin) = Self::artifact_lock(&mut locks, &dir).try_write_owned() else {
+            return Ok(DeleteVersion::Busy);
+        };
+        tx.execute(
+            "DELETE FROM revisions WHERE app=?1 AND id=?2 AND active=0",
+            params![app, id],
+        )?;
+        tx.commit()?;
+        Ok(DeleteVersion::Deleted(dir))
+    }
+
     fn activate_in(conn: &Connection, app: &str, id: &str) -> Result<()> {
         let snapshot: Option<(Option<String>, Option<String>)> = conn
             .query_row(
@@ -217,6 +334,15 @@ impl Db {
         let Some((Some(manifest), Some(domain))) = snapshot else {
             bail!("revision '{id}' for app '{app}' is missing or has no historical manifest; redeploy the desired version");
         };
+        let conflict: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM apps a JOIN revisions r ON r.app=a.name AND r.active=1
+             WHERE a.name!=?1 AND a.domain=?2 COLLATE NOCASE)",
+            params![app, domain],
+            |r| r.get(0),
+        )?;
+        if conflict {
+            bail!("domain '{domain}' is already active for another app");
+        }
         conn.execute(
             "UPDATE revisions SET active=0 WHERE app=?1 AND active=1",
             params![app],
@@ -455,6 +581,129 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn version_lifecycle_keeps_data_secrets_and_other_versions() {
+        let db = memory();
+        deploy(&db, "r1");
+        deploy(&db, "r2");
+        db.set_secret("a", "TOKEN", b"value").unwrap();
+        assert_eq!(db.delete_version("a", "r2").unwrap(), DeleteVersion::Active);
+        assert!(db.deactivate("a").unwrap());
+        assert!(db.deactivate("a").unwrap()); // idempotent
+        assert!(!db.deactivate("missing").unwrap());
+        assert!(db.active_revision("a").unwrap().is_none());
+        assert!(db.active_app_by_domain("r2.localhost").unwrap().is_none());
+        assert_eq!(db.list_apps().unwrap()[0].status, "inactive");
+        db.activate("a", "r1").unwrap();
+        assert_active(&db, "r1");
+        assert_eq!(
+            db.delete_version("a", "r2").unwrap(),
+            DeleteVersion::Deleted("/x/r2".into())
+        );
+        assert_eq!(
+            db.delete_version("a", "r2").unwrap(),
+            DeleteVersion::Missing
+        );
+        assert_eq!(db.revisions("a").unwrap().len(), 1);
+        assert_eq!(db.get_secret_enc("a", "TOKEN").unwrap().unwrap(), b"value");
+    }
+
+    #[test]
+    fn deletion_pins_are_per_version_and_never_block_unrelated_traffic() {
+        let db = memory();
+        deploy(&db, "r1");
+        let (_, _, pin) = db.pin_active_by_domain("r1.localhost").unwrap().unwrap();
+        deploy(&db, "r2");
+        assert_eq!(db.delete_version("a", "r1").unwrap(), DeleteVersion::Busy);
+        let (_, _, other_pin) = db.pin_active_by_domain("r2.localhost").unwrap().unwrap();
+        assert!(db.delete_app("a").is_err());
+        drop(pin);
+        assert_eq!(
+            db.delete_version("a", "r1").unwrap(),
+            DeleteVersion::Deleted("/x/r1".into())
+        );
+        assert!(db.pin_revision("a", "r1").unwrap().is_none());
+        assert_eq!(db.active_revision("a").unwrap().unwrap().id, "r2");
+        drop(other_pin);
+    }
+
+    #[test]
+    fn legacy_inactive_version_without_manifest_can_be_deleted() {
+        let db = memory();
+        deploy(&db, "r1");
+        db.c().execute("INSERT INTO revisions(id,app,artifact_dir,active) VALUES('legacy','a','/x/legacy',0)", []).unwrap();
+        assert!(db.activate("a", "legacy").is_err());
+        assert_eq!(
+            db.delete_version("a", "legacy").unwrap(),
+            DeleteVersion::Deleted("/x/legacy".into())
+        );
+        assert_active(&db, "r1");
+    }
+
+    #[test]
+    fn versions_sort_deterministically_and_domains_cannot_steal_active_routes() {
+        let db = memory();
+        deploy(&db, "r1");
+        deploy(&db, "r2");
+        assert_eq!(
+            db.revisions("a")
+                .unwrap()
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["r2", "r1"]
+        );
+        assert!(db
+            .deploy_revision("b", "b1", "/b/1", "R2.LOCALHOST", "name: b")
+            .is_err());
+        assert!(db.get_app("b").unwrap().is_none());
+        assert_active(&db, "r2");
+        db.deactivate("a").unwrap();
+        db.deploy_revision("b", "b1", "/b/1", "r2.localhost", "name: b")
+            .unwrap();
+        assert!(db.activate("a", "r2").is_err());
+        assert!(db.active_revision("a").unwrap().is_none());
+    }
+
+    #[test]
+    fn concurrent_activation_deletion_and_deploy_preserve_invariants() {
+        let db = memory();
+        deploy(&db, "r1");
+        deploy(&db, "r2");
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let mut threads = Vec::new();
+        for action in 0..3 {
+            let db = db.clone();
+            let barrier = barrier.clone();
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                for i in 0..30 {
+                    match action {
+                        0 => {
+                            let _ = db.activate("a", "r1");
+                        }
+                        1 => {
+                            let _ = db.delete_version("a", "r1");
+                        }
+                        _ => {
+                            deploy(&db, &format!("new{i:02}"));
+                        }
+                    }
+                }
+            }));
+        }
+        barrier.wait();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let revisions = db.revisions("a").unwrap();
+        let active = revisions.iter().filter(|r| r.active).collect::<Vec<_>>();
+        assert_eq!(active.len(), 1);
+        let app = db.get_app("a").unwrap().unwrap();
+        assert_eq!(active[0].domain.as_deref(), Some(app.domain.as_str()));
+        assert_eq!(active[0].manifest.as_deref(), Some(app.manifest.as_str()));
     }
 
     #[test]

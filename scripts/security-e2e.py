@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import tarfile
 import tempfile
@@ -117,9 +118,52 @@ def main():
             assert request(port, "/", host="second.localhost")[0] == 404
             detail = json.loads(request(port, "/api/apps/hello")[1])
             assert detail["manifest"] == manifest_a
+            # Exercise public version management through genuine HTTP and CLI.
+            with sqlite3.connect(data / "pushit.db") as conn:
+                retained_secret = conn.execute("SELECT value_enc FROM secrets WHERE app='hello' AND key='KEY'").fetchone()[0]
+            with sqlite3.connect(data / "appdata" / "hello" / "local.db") as conn:
+                conn.execute("INSERT INTO hello (id,msg) VALUES (99999,'must survive version lifecycle')")
+            versions = json.loads(request(port, "/api/apps/hello/versions")[1])
+            assert {v["id"] for v in versions} == {a, b}
+            assert request(port, f"/api/apps/hello/versions/{a}", "DELETE")[0] == 409
+            assert request(port, "/api/apps/hello/deactivate", "POST")[0] == 204
+            assert request(port, "/api/apps/hello/deactivate", "POST")[0] == 204
+            for host in ["first.localhost", "second.localhost"]:
+                for path in ["/", "/config.js", "/_fn/hello", "/_fn/sql"]:
+                    assert request(port, path, host=host)[0] == 404, (host, path)
+            assert json.loads(request(port, "/api/apps")[1])[0]["status"] == "inactive"
+            cli = ROOT / "target/debug/pushit"
+            cli_env = {k: v for k, v in os.environ.items() if not k.startswith("PUSHIT_")}
+            cli_env.update(HOME=str(data / "cli-home"), XDG_CONFIG_HOME=str(data / "cli-config"))
+            def run_cli(*args, ok=True):
+                result = subprocess.run([str(cli), "--server", f"http://127.0.0.1:{port}", "--dev", "version", *args],
+                                        env=cli_env, capture_output=True, timeout=30)
+                assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
+                return result
+            assert len(json.loads(run_cli("list", "hello").stdout)) == 2
+            run_cli("activate", "hello", b)
+            assert request(port, "/config.js", host="second.localhost")[1] == b'window.__ENV__ = {"VERSION":"B"};\n'
+            run_cli("activate", "hello", a)
+            assert request(port, "/_fn/hello", host="first.localhost")[0] == 200
+            assert request(port, "/_fn/sql", host="first.localhost")[0] == 200
+            run_cli("delete", "hello", a, "--yes", ok=False)
+            run_cli("delete", "hello", b, "--yes")
+            assert not (data / "apps" / "hello" / b).exists()
+            assert (data / "apps" / "hello" / a / "app.wasm").is_file()
+            assert (data / "appdata" / "hello" / "local.db").is_file()
+            assert request(port, f"/api/apps/hello/versions/{b}/activate", "POST")[0] == 404
+            assert request(port, f"/api/apps/hello/versions/{b}", "DELETE")[0] == 404
+            with sqlite3.connect(data / "pushit.db") as conn:
+                assert conn.execute("SELECT value_enc FROM secrets WHERE app='hello' AND key='KEY'").fetchone()[0] == retained_secret
+            with sqlite3.connect(data / "appdata" / "hello" / "local.db") as conn:
+                assert conn.execute("SELECT msg FROM hello WHERE id=99999").fetchone()[0] == "must survive version lifecycle"
+            run_cli("deactivate", "hello")
+            assert request(port, "/", host="first.localhost")[0] == 404
+            run_cli("activate", "hello", a)
+            assert request(port, "/_fn/hello", host="first.localhost")[0] == 200
         finally:
             stop(proc, log)
-    print("PASS: production startup/auth and real WASM deploy A -> B -> rollback A")
+    print("PASS: production startup/auth, real WASM deploy/rollback and HTTP + CLI version lifecycle")
 
 
 if __name__ == "__main__":

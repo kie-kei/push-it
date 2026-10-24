@@ -7,17 +7,17 @@
 <body><main class="container">
 <h1>PushIt <small>— {{ user }}</small></h1>
 <table>
-<thead><tr><th>app</th><th>domain</th><th>revision</th><th>deployed</th></tr></thead>
+<thead><tr><th>app</th><th>domain</th><th>version</th><th>status</th><th>deployed</th></tr></thead>
 <tbody>
 {% for a in apps %}
 <tr>
   <td><a href="/apps/{{ a.name }}">{{ a.name }}</a></td>
-  <td><a href="http://{{ a.domain }}">{{ a.domain }}</a></td>
-  <td>{{ a.revision }}</td>
+  <td><a href="//{{ a.domain }}">{{ a.domain }}</a></td>
+  <td>{{ a.revision }}</td><td>{{ a.status }}</td>
   <td>{{ a.deployed_at }}</td>
 </tr>
 {% else %}
-<tr><td colspan="4"><em>no apps deployed</em></td></tr>
+<tr><td colspan="5"><em>no apps deployed</em></td></tr>
 {% endfor %}
 </tbody>
 </table>

@@ -23,6 +23,33 @@ Auth (prod): `Authorization: Bearer <Keycloak access token>` — controller vali
 `GET /api/apps` → `[{"name","domain","revision","deployed_at","status"}]`
 `GET /api/apps/{name}` → app detail + manifest + revision history
 `POST /api/apps/{name}/rollback` — body `{"revision":"<id>"}` (omit → previous revision)
+
+### Immutable app versions
+
+Version IDs are the existing opaque revision IDs, not Git SHAs. No migration or
+new identifier is required. Every successful deploy immediately activates its new
+version. An app has at most one active version, and may have none.
+
+- `GET /api/apps/{name}/versions` → `[{"id":"<id>","created_at":"...","active":true}]`, newest first, ties by ID descending. Missing app: 404.
+- `POST /api/apps/{name}/versions/{id}/activate` → `{"app":"name","version":"<id>"}`. Atomically switches code, static UI, manifest/env/capabilities and domain to the existing immutable snapshot. Missing version: 404; missing/legacy manifest, artifact or required secrets: 400, leaving the prior active version unchanged.
+- `POST /api/apps/{name}/deactivate` → 204 (idempotent); missing app: 404. With no active version, functions **and** UI/static/config routes return 404. All versions remain available for later activation.
+- `DELETE /api/apps/{name}/versions/{id}` → 204. Deletes only this inactive version and its artifacts/cache entries. Active version: 409; missing version: 404. If an in-flight request still uses an inactive version, returns 409: retry after the request finishes. Unrelated apps/versions remain available. Legacy inactive versions without manifest snapshots can also be deleted.
+
+Metadata deletion is authoritative. Filesystem cleanup failures are logged and
+may leave unserved orphan artifact directories; deleted versions cannot be
+reactivated even if cleanup failed.
+
+Browser session-authenticated lifecycle mutations require `X-PushIt-CSRF: 1`;
+when `Origin` is supplied it must match the request Host. Cross-origin CORS access
+is not enabled. Bearer CLI clients need no browser CSRF header.
+
+Activation/deactivation/deletion never restore or remove app secrets, local
+SQL data, blob data or other versions. Activation/rollback restores **configuration
+references**, not secret values or database contents. Older versions must be
+compatible with the current data/schema. The existing rollback API and revision
+history remain compatible; rollback without a target still selects the newest
+inactive version with a known snapshot.
+
 `DELETE /api/apps/{name}` — removes app, revisions, route
 
 ## Logs
