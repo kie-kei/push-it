@@ -18,6 +18,20 @@ curl -fsSL https://raw.githubusercontent.com/kie-kei/push-it/master/scripts/inst
 curl -fsSL https://raw.githubusercontent.com/kie-kei/push-it/master/scripts/uninstall.sh | sh
 ```
 
+### Skill для coding agents
+
+```bash
+pushit skill install             # ~/.agents/skills/pushit/
+pushit skill install --project   # ./.agents/skills/pushit/ в текущем каталоге
+```
+
+После подтверждения устанавливаются `SKILL.md` и три документа в `references/`;
+они встроены в CLI, исходный checkout для установки не нужен. Повторная установка
+перезаписывает эти файлы после подтверждения, остальные файлы не удаляет.
+Старый каталог `.agents/skill/pushit/` автоматически не переносится и не удаляется:
+проверьте свои изменения перед его ручной очисткой. `pushit skill` печатает гайд
+без установки.
+
 ## Quickstart (dev)
 
 ```bash

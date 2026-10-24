@@ -33,7 +33,7 @@ struct Cli {
 
 #[derive(Args)]
 struct SkillInstallArgs {
-    /// Install into ./.agents/skill/pushit instead of the home directory.
+    /// Install into ./.agents/skills/pushit instead of the home directory.
     #[arg(long)]
     project: bool,
 }
@@ -59,7 +59,7 @@ enum ProfileCmd {
 
 #[derive(Subcommand)]
 enum SkillCmd {
-    /// Install the skill for coding agents (~/.agents/skill/pushit, or --project).
+    /// Install the skill for coding agents (~/.agents/skills/pushit, or --project).
     Install(SkillInstallArgs),
 }
 
@@ -889,6 +889,20 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
 }
 
 const SKILL_MD: &str = include_str!("../../skills/pushit-app/SKILL.md");
+const SKILL_REFERENCES: &[(&str, &str)] = &[
+    (
+        "sql.md",
+        include_str!("../../skills/pushit-app/references/sql.md"),
+    ),
+    (
+        "blobstore.md",
+        include_str!("../../skills/pushit-app/references/blobstore.md"),
+    ),
+    (
+        "logging.md",
+        include_str!("../../skills/pushit-app/references/logging.md"),
+    ),
+];
 
 /// `pushit login`: open `{server}/auth/device` in a browser, catch the
 /// minted long-lived token on a localhost listener, store it for client().
@@ -1062,17 +1076,17 @@ fn profile_cmd(cmd: ProfileCmd) -> Result<()> {
 
 fn skill_install(a: &SkillInstallArgs) -> Result<()> {
     let target = if a.project {
-        PathBuf::from(".agents/skill/pushit/SKILL.md")
+        PathBuf::from(".agents/skills/pushit/SKILL.md")
     } else {
         std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".agents/skill/pushit/SKILL.md"))
+            .map(|h| PathBuf::from(h).join(".agents/skills/pushit/SKILL.md"))
             .ok_or_else(|| anyhow!("HOME is not set; use --project"))?
     };
     print!(
         "install pushit skill to {}?{} [y/N] ",
         target.parent().unwrap().display(),
         if target.exists() {
-            " (will overwrite)"
+            " (will overwrite SKILL.md and bundled references)"
         } else {
             ""
         }
@@ -1088,18 +1102,11 @@ fn skill_install(a: &SkillInstallArgs) -> Result<()> {
         fs::create_dir_all(dir)?;
     }
     fs::write(&target, SKILL_MD)?;
-    // references/ travels with the skill (relative links in SKILL.md)
-    let refs_dir =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/pushit-app/references");
-    if refs_dir.is_dir() {
-        let dest = target.parent().unwrap().join("references");
-        fs::create_dir_all(&dest)?;
-        for entry in fs::read_dir(&refs_dir)?.filter_map(|e| e.ok()) {
-            let dest_file = dest.join(entry.file_name());
-            if entry.path().is_file() {
-                fs::copy(entry.path(), &dest_file)?;
-            }
-        }
+    // Embed references too: an installed binary must not need its build checkout.
+    let dest = target.parent().unwrap().join("references");
+    fs::create_dir_all(&dest)?;
+    for (name, content) in SKILL_REFERENCES {
+        fs::write(dest.join(name), content)?;
     }
     println!("installed: {}", target.display());
     Ok(())
