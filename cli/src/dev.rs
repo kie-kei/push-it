@@ -243,6 +243,7 @@ async fn handle(
 
         let mut log_rx = logs.subscribe(app_name);
         let caps = HostCaps {
+            artifact_pin: None,
             allow_http_out: http_out,
             data_dir: data_dir.to_path_buf(),
             sql_allowed,

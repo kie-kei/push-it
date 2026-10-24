@@ -98,6 +98,9 @@ enum Cmd {
     List,
     /// Show app detail and revision history.
     Status { app: String },
+    /// Manage immutable app versions (deploy creates and activates a version).
+    #[command(subcommand)]
+    Version(VersionCmd),
     /// Roll back to a previous revision.
     Rollback {
         app: String,
@@ -109,6 +112,24 @@ enum Cmd {
     Delete { app: String },
     /// Tail app logs, or stream them with -f.
     Logs(LogsArgs),
+}
+
+#[derive(Subcommand)]
+enum VersionCmd {
+    /// List versions, newest first (revision IDs are version IDs).
+    List { app: String },
+    /// Atomically activate an existing version, restoring code + configuration.
+    Activate { app: String, version: String },
+    /// Stop serving this app; keep all versions, secrets and data.
+    Deactivate { app: String },
+    /// Permanently delete one inactive version, never app data or secrets.
+    Delete {
+        app: String,
+        version: String,
+        /// Skip the interactive deletion confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Args)]
@@ -243,7 +264,7 @@ fn main() -> Result<()> {
         ),
         Cmd::Rollback { app, revision } => {
             let body = match revision {
-                Some(r) => format!("{{\"revision\":\"{r}\"}}"),
+                Some(r) => serde_json::json!({"revision": r}).to_string(),
                 None => "{}".into(),
             };
             show(
@@ -254,8 +275,73 @@ fn main() -> Result<()> {
                     .send()?,
             )
         }
+        Cmd::Version(cmd) => version_cmd(&server, &client, cmd),
         Cmd::Delete { app } => delete(&server, &client, &app),
         Cmd::Logs(a) => logs(&server, &client, a),
+    }
+}
+
+fn version_cmd(server: &str, client: &Client, cmd: VersionCmd) -> Result<()> {
+    // Reject path separators rather than interpolating arbitrary paths into API
+    // URLs. Version IDs are opaque revision IDs, not Git SHAs.
+    let valid = |value: &str| -> Result<()> {
+        if value.is_empty()
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+        {
+            bail!("invalid app/version identifier '{value}'");
+        }
+        Ok(())
+    };
+    match cmd {
+        VersionCmd::List { app } => {
+            valid(&app)?;
+            show(
+                client
+                    .get(url(server, &format!("/api/apps/{app}/versions")))
+                    .send()?,
+            )
+        }
+        VersionCmd::Activate { app, version } => {
+            valid(&app)?;
+            valid(&version)?;
+            show(
+                client
+                    .post(url(
+                        server,
+                        &format!("/api/apps/{app}/versions/{version}/activate"),
+                    ))
+                    .send()?,
+            )
+        }
+        VersionCmd::Deactivate { app } => {
+            valid(&app)?;
+            show(
+                client
+                    .post(url(server, &format!("/api/apps/{app}/deactivate")))
+                    .send()?,
+            )
+        }
+        VersionCmd::Delete { app, version, yes } => {
+            valid(&app)?;
+            valid(&version)?;
+            if !yes {
+                eprint!("Permanently delete inactive version {version} of {app}? App data/secrets are kept. [y/N] ");
+                std::io::stderr().flush()?;
+                let mut answer = String::new();
+                std::io::stdin().read_line(&mut answer)?;
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    println!("Canceled.");
+                    return Ok(());
+                }
+            }
+            show(
+                client
+                    .delete(url(server, &format!("/api/apps/{app}/versions/{version}")))
+                    .send()?,
+            )
+        }
     }
 }
 
@@ -1538,5 +1624,30 @@ mod sync_repo_tests {
             git(&cache, &["rev-parse", "HEAD"]),
             git(&a, &["rev-parse", "HEAD"])
         );
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::*;
+
+    #[test]
+    fn parses_version_management_and_legacy_rollback() {
+        for args in [
+            vec!["pushit", "version", "list", "hello"],
+            vec!["pushit", "version", "activate", "hello", "r123"],
+            vec!["pushit", "version", "deactivate", "hello"],
+            vec!["pushit", "version", "delete", "hello", "r123", "--yes"],
+            vec!["pushit", "rollback", "hello", "--revision", "r123"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_ok());
+        }
+        for args in [
+            vec!["pushit", "version", "activate", "hello"],
+            vec!["pushit", "version", "delete", "hello"],
+            vec!["pushit", "version", "deactivate", "hello", "r123"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 }

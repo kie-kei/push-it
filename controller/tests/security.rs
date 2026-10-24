@@ -11,7 +11,7 @@ use pushit_controller::{
     secrets::Secrets,
     server::{router, AppState},
 };
-use std::{sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tower::ServiceExt;
 
 fn state(dev: bool) -> (tempfile::TempDir, Arc<AppState>) {
@@ -47,6 +47,10 @@ async fn production_rejects_forged_dev_header_on_api_and_browser_routes() {
         ("DELETE", "/api/apps/victim"),
         ("POST", "/api/apps/victim/deploy"),
         ("POST", "/api/apps/victim/rollback"),
+        ("GET", "/api/apps/victim/versions"),
+        ("POST", "/api/apps/victim/deactivate"),
+        ("POST", "/api/apps/victim/versions/r1/activate"),
+        ("DELETE", "/api/apps/victim/versions/r1"),
         ("PUT", "/api/apps/victim/secrets/KEY"),
         ("DELETE", "/api/apps/victim/secrets/KEY"),
         ("PUT", "/api/secrets/global/KEY"),
@@ -328,5 +332,318 @@ async fn rollback_restores_manifest_routes_and_static_config_but_not_secret_valu
     assert_eq!(
         state.db.get_global_secret("NEW_DB").unwrap().unwrap(),
         rotated
+    );
+}
+
+#[tokio::test]
+async fn version_mutations_require_browser_csrf_header_and_same_origin() {
+    let (_dir, state) = state(false);
+    state
+        .db
+        .deploy_revision(
+            "example",
+            "r1",
+            "/unused",
+            "example.localhost",
+            "name: example",
+        )
+        .unwrap();
+    let user = User::dev();
+    let cookie = format!("pushit_session={}", state.auth.sign_session(&user));
+    let app = router(state.clone());
+    for path in [
+        "/api/apps/example/deactivate",
+        "/api/apps/example/versions/r1/activate",
+        "/api/apps/example/versions/r1",
+    ] {
+        let method = if path.ends_with("/r1") {
+            "DELETE"
+        } else {
+            "POST"
+        };
+        for (csrf, origin) in [
+            (false, "http://hub.localhost"),
+            (true, "http://evil.localhost"),
+            (true, "null"),
+        ] {
+            let mut request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::HOST, "hub.localhost")
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, origin);
+            if csrf {
+                request = request.header("x-pushit-csrf", "1");
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        }
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/apps/example/deactivate")
+                .header(header::HOST, "hub.localhost")
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, "http://hub.localhost")
+                .header("x-pushit-csrf", "1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/apps/example/deactivate")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", state.auth.sign_api_token(&user)),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn inactive_versions_are_not_routed_and_errors_are_useful() {
+    let (_dir, state) = state(true);
+    let artifact = state.cfg.apps_dir().join("example/r1");
+    std::fs::create_dir_all(artifact.join("dist")).unwrap();
+    std::fs::write(artifact.join("dist/index.html"), "example").unwrap();
+    state
+        .db
+        .deploy_revision(
+            "example",
+            "r1",
+            artifact.to_str().unwrap(),
+            "example.localhost",
+            "name: example",
+        )
+        .unwrap();
+    let app = router(state.clone());
+    let request = |method: &str, path: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "example.localhost")
+            .body(Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone()
+            .oneshot(request("GET", "/"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let response = app
+        .clone()
+        .oneshot(request("DELETE", "/api/apps/example/versions/r1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), 8192).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("active version"));
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/api/apps/example/deactivate"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    for path in ["/", "/config.js", "/_fn/hello"] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request("GET", path))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "POST",
+                "/api/apps/example/versions/missing/activate"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("POST", "/api/apps/example/versions/r1/activate"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(state.db.active_revision("example").unwrap().is_none());
+    assert_eq!(
+        app.clone()
+            .oneshot(request("DELETE", "/api/apps/example/versions/r1"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(!artifact.exists());
+    assert!(state.db.get_app("example").unwrap().is_some());
+    assert_eq!(
+        app.oneshot(request("POST", "/api/apps/missing/deactivate"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn in_flight_http_body_pins_only_its_version_and_cancel_releases_it() {
+    let (_dir, state) = state(true);
+    let old = state.cfg.apps_dir().join("example/r1");
+    let current = state.cfg.apps_dir().join("example/r2");
+    let other = state.cfg.apps_dir().join("other/r1");
+    for (dir, text) in [(&old, "old"), (&current, "current"), (&other, "other")] {
+        std::fs::create_dir_all(dir.join("dist")).unwrap();
+        std::fs::write(dir.join("dist/index.html"), text).unwrap();
+    }
+    state
+        .db
+        .deploy_revision(
+            "example",
+            "r1",
+            old.to_str().unwrap(),
+            "example.localhost",
+            "name: example",
+        )
+        .unwrap();
+    state
+        .db
+        .deploy_revision(
+            "other",
+            "r1",
+            other.to_str().unwrap(),
+            "other.localhost",
+            "name: other",
+        )
+        .unwrap();
+    let app = router(state.clone());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (_finish_tx, finish_rx) = tokio::sync::oneshot::channel::<()>();
+    let body = Body::from_stream(futures::stream::once(async move {
+        // Body polling happens only after routing has atomically pinned r1.
+        started_tx.send(()).unwrap();
+        let _ = finish_rx.await;
+        Ok::<_, Infallible>(axum::body::Bytes::new())
+    }));
+    let handler = tokio::spawn(
+        app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/_fn/hello")
+                .header(header::HOST, "example.localhost")
+                .body(body)
+                .unwrap(),
+        ),
+    );
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    state
+        .db
+        .deploy_revision(
+            "example",
+            "r2",
+            current.to_str().unwrap(),
+            "example.localhost",
+            "name: example",
+        )
+        .unwrap();
+    let request = |method: &str, path: &str| {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "example.localhost")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let response = app
+        .clone()
+        .oneshot(request("DELETE", "/api/apps/example/versions/r1"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(
+        String::from_utf8_lossy(&to_bytes(response.into_body(), 8192).await.unwrap())
+            .contains("in-flight")
+    );
+    assert!(old.exists());
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.clone().oneshot(request("GET", "/")),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), 8192).await.unwrap(),
+        "current"
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request("DELETE", "/api/apps/example"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.clone().oneshot(
+            Request::builder()
+                .uri("/")
+                .header(header::HOST, "other.localhost")
+                .body(Body::empty())
+                .unwrap(),
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(to_bytes(response.into_body(), 8192).await.unwrap(), "other");
+    handler.abort();
+    assert!(handler.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        app.oneshot(request("DELETE", "/api/apps/example/versions/r1"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(!old.exists());
+    assert!(current.exists());
+    assert_eq!(
+        state.db.active_revision("example").unwrap().unwrap().id,
+        "r2"
     );
 }

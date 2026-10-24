@@ -4,17 +4,23 @@
 <meta charset="utf-8"><title>{{ app.name }} — PushIt</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 </head>
-<body><main class="container">
+<body><main class="container" data-app="{{ app.name }}">
 <p><a href="/">&larr; apps</a></p>
 <h1>{{ app.name }}</h1>
-<p><a href="http://{{ app.domain }}">{{ app.domain }}</a> &middot; created {{ app.created_at }}</p>
+<p><a href="//{{ app.domain }}">{{ app.domain }}</a> &middot; created {{ app.created_at }}</p>
 
-<h2>Revisions</h2>
+<h2>Versions</h2>
+<p>{% if active %}<strong>Active</strong>{% else %}<strong>Inactive</strong>: functions and UI are not served.{% endif %}</p>
+<p>Deploy creates and activates an immutable version. Activating restores code and configuration, not database data or secret values.</p>
+<p><button id="deactivate" type="button">Deactivate app</button> (stops functions and UI; keeps versions, data and secrets)</p>
+<p id="version-result" role="status"></p>
 <table>
-<thead><tr><th>id</th><th>created</th><th>active</th></tr></thead>
+<thead><tr><th>id</th><th>created</th><th>state</th><th>actions</th></tr></thead>
 <tbody>
 {% for r in revs %}
-<tr><td>{{ r.id }}</td><td>{{ r.created_at }}</td><td>{% if r.active %}<strong>active</strong>{% endif %}</td></tr>
+<tr><td>{{ r.id }}</td><td>{{ r.created_at }}</td><td>{% if r.active %}<strong>active</strong>{% else %}inactive{% endif %}</td>
+<td>{% if r.active %}{% else %}<button type="button" data-action="activate" data-version="{{ r.id }}">Activate</button>
+<button type="button" data-action="delete" data-version="{{ r.id }}">Delete</button>{% endif %}</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -29,8 +35,33 @@
 <pre id="log">{% for l in logs %}{{ l }}
 {% endfor %}</pre>
 <script>
-const es = new EventSource('/api/apps/{{ app.name }}/logs/stream');
+const app = document.querySelector('main').dataset.app;
+const api = '/api/apps/' + encodeURIComponent(app);
+const es = new EventSource(api + '/logs/stream');
 es.onmessage = e => { document.getElementById('log').textContent += e.data + "\n"; };
+let pending = false;
+async function changeVersion(action, version) {
+  if (pending) return;
+  if (action === 'delete' && !confirm('Permanently delete inactive version ' + version + '? App data and secrets are kept.')) return;
+  if (action === 'deactivate' && !confirm('Stop serving this app? You can activate any retained version later.')) return;
+  pending = true;
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(b => b.disabled = true);
+  const result = document.getElementById('version-result');
+  result.textContent = 'Working…';
+  const suffix = action === 'deactivate' ? '/deactivate' : '/versions/' + encodeURIComponent(version) + (action === 'activate' ? '/activate' : '');
+  try {
+    const res = await fetch(api + suffix, {method: action === 'delete' ? 'DELETE' : 'POST', headers: {'X-PushIt-CSRF': '1'}, credentials: 'same-origin'});
+    if (!res.ok) throw new Error(await res.text());
+    location.reload();
+  } catch (error) {
+    result.textContent = 'Could not update version: ' + error.message;
+    pending = false;
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+document.getElementById('deactivate').addEventListener('click', () => changeVersion('deactivate'));
+document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', () => changeVersion(button.dataset.action, button.dataset.version)));
 </script>
 <details><summary>Manifest</summary><pre>{{ app.manifest }}</pre></details>
 </main></body></html>
