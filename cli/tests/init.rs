@@ -1,6 +1,78 @@
 use std::{fs, process::Command};
 
 #[test]
+fn scaffold_is_standalone_inside_and_outside_a_cargo_workspace() {
+    let root = std::env::temp_dir().join(format!("pushit-init-workspace-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    for nested in [false, true] {
+        for named in [false, true] {
+            let parent = root.join(format!("nested-{nested}-named-{named}"));
+            fs::create_dir(&parent).unwrap();
+            let workspace = b"[workspace]\nresolver = \"2\"\nmembers = []\n";
+            if nested {
+                fs::write(parent.join("Cargo.toml"), workspace).unwrap();
+            }
+            let current = parent.join("current-app");
+            fs::create_dir(&current).unwrap();
+            let args = if named {
+                vec!["init", "hello-app"]
+            } else {
+                vec!["init"]
+            };
+            let init = || {
+                Command::new(env!("CARGO_BIN_EXE_pushit"))
+                    .args(&args)
+                    .current_dir(&current)
+                    .output()
+                    .unwrap()
+            };
+            let output = init();
+            assert!(output.status.success(), "{output:?}");
+            let app = if named {
+                current.join("hello-app")
+            } else {
+                current.clone()
+            };
+            let manifest = app.join("fn/Cargo.toml");
+            let metadata = Command::new(env!("CARGO"))
+                .args([
+                    "metadata",
+                    "--no-deps",
+                    "--format-version",
+                    "1",
+                    "--offline",
+                    "--manifest-path",
+                ])
+                .arg(&manifest)
+                .current_dir(&app)
+                .output()
+                .unwrap();
+            assert!(metadata.status.success(), "{metadata:?}");
+            let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+            assert_eq!(
+                metadata["workspace_root"].as_str().unwrap(),
+                app.join("fn").canonicalize().unwrap().to_str().unwrap()
+            );
+            // Re-running init must reject existing apps without overwriting edits.
+            fs::write(app.join("fn/src/lib.rs"), "// user changes\n").unwrap();
+            let original_manifest = fs::read(&manifest).unwrap();
+            let output = init();
+            assert!(!output.status.success(), "{output:?}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("pushit.yaml already exists"));
+            assert_eq!(fs::read(&manifest).unwrap(), original_manifest);
+            assert_eq!(
+                fs::read_to_string(app.join("fn/src/lib.rs")).unwrap(),
+                "// user changes\n"
+            );
+            if nested {
+                assert_eq!(fs::read(parent.join("Cargo.toml")).unwrap(), workspace);
+            }
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn scaffold_build_target_and_deploy_entry_match_cargo_component_output() {
     let root = std::env::temp_dir().join(format!("pushit-init-target-{}", std::process::id()));
     fs::create_dir(&root).unwrap();
