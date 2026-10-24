@@ -1157,13 +1157,15 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
     Ok(())
 }
 
+// cargo-component builds a WASI Preview 1 core module and adapts it into a
+// component in the same target directory; the deploy entry must match that path.
 const INIT_MANIFEST: &str = r#"name: {name}
-entry: fn/target/wasm32-wasip2/release/{crate_name}.wasm
+entry: fn/target/wasm32-wasip1/release/{crate_name}.wasm
 env:
   GREETING: hello from env
 secrets: []
 build:
-  fn: cd fn && cargo component build --release --target wasm32-wasip2
+  fn: cd fn && cargo component build --release --target wasm32-wasip1
   ui_dist: ui
 "#;
 
@@ -1276,7 +1278,7 @@ fn init(args: InitArgs) -> Result<()> {
     write_new("ui/index.html", INIT_INDEX_HTML.replace("{name}", &name))?;
     write_new(
         "fn/.cargo/config.toml",
-        "[build]\ntarget = \"wasm32-wasip2\"\n".to_string(),
+        "[build]\ntarget = \"wasm32-wasip1\"\n".to_string(),
     )?;
     println!("\nnext: pushit build && pushit --dev deploy");
     Ok(())
