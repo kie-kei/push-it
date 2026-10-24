@@ -56,11 +56,22 @@ impl Auth {
     }
 
     pub fn try_new(cfg: Config) -> Result<Self> {
-        let local = if cfg.auth_mode == crate::config::AuthMode::Local {
-            crate::config::validate_local(&cfg.base_domain, &cfg.bind)?;
-            Some(std::sync::Arc::new(crate::local_auth::LocalAuth::open(
-                &cfg.data_dir,
-            )?))
+        let local = if cfg.owner_auth() {
+            if cfg.auth_mode == crate::config::AuthMode::Builtin {
+                crate::config::validate_builtin(
+                    &cfg.base_domain,
+                    &cfg.bind,
+                    cfg.external_origin.as_deref(),
+                )?;
+            } else {
+                crate::config::validate_local(&cfg.base_domain, &cfg.bind)?;
+            }
+            Some(std::sync::Arc::new(
+                crate::local_auth::LocalAuth::open_mode(
+                    &cfg.data_dir,
+                    cfg.auth_mode == crate::config::AuthMode::Builtin,
+                )?,
+            ))
         } else {
             None
         };
@@ -139,7 +150,7 @@ impl Auth {
     pub fn user_from_headers(&self, headers: &HeaderMap) -> Option<User> {
         if let Some(local) = &self.local {
             let authority = headers.get(axum::http::header::HOST)?.to_str().ok()?;
-            let hub = authority.split(':').next() == Some("hub.localhost");
+            let hub = authority == self.cfg.hub_authority();
             return local.browser_user(headers, authority, hub);
         }
         let c = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
@@ -158,7 +169,7 @@ impl Auth {
 
     pub fn verify_api_token(&self, headers: &HeaderMap) -> Option<User> {
         if let Some(local) = &self.local {
-            return local.bearer_user(headers);
+            return local.bearer_user(headers, &self.cfg.hub_authority());
         }
         let h = headers
             .get(axum::http::header::AUTHORIZATION)?
@@ -478,6 +489,7 @@ mod tests {
         Config {
             data_dir: std::path::PathBuf::new(),
             base_domain: "localhost".into(),
+            external_origin: None,
             bind: "127.0.0.1:0".into(),
             dev: false,
             auth_mode: crate::config::AuthMode::Oidc,

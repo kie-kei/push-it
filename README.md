@@ -4,9 +4,13 @@
 
 [Видение](VISION.md) · [Приоритеты и критерии готовности](ROADMAP.md) · [Архитектура](ARCHITECTURE.md) · [API](API.md).
 
-## Standalone local platform
+## Standalone platform
 
-Want the full controller, hub, app subdomains, versions and secrets without Keycloak/Caddy? Use explicit **local owner auth** on loopback. It is separate from `pushit dev` and does not disable authentication. See [setup, CLI login and security boundaries](docs/standalone-local-auth.md).
+Want the full controller, hub, app subdomains, versions and secrets without Keycloak/Caddy? Use explicit **local owner auth** on loopback. It is separate from `pushit dev` and does not disable authentication. See [local setup, CLI login and security boundaries](docs/standalone-local-auth.md).
+
+For a fixed external HTTPS domain behind any same-host reverse proxy, use explicit
+**builtin owner auth**: [proxy contract and tested nginx setup](docs/standalone-proxy-auth.md).
+No embedded TLS or mandatory Keycloak/Caddy; the controller remains loopback HTTP.
 
 ## Установка CLI
 
