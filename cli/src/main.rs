@@ -1157,13 +1157,15 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
     Ok(())
 }
 
+// cargo-component builds a WASI Preview 1 core module and adapts it into a
+// component in the same target directory; the deploy entry must match that path.
 const INIT_MANIFEST: &str = r#"name: {name}
-entry: fn/target/wasm32-wasip2/release/{crate_name}.wasm
+entry: fn/target/wasm32-wasip1/release/{crate_name}.wasm
 env:
   GREETING: hello from env
 secrets: []
 build:
-  fn: cd fn && cargo component build --release --target wasm32-wasip2
+  fn: cd fn && cargo component build --release --target wasm32-wasip1
   ui_dist: ui
 "#;
 
@@ -1190,9 +1192,64 @@ crate-type = ["cdylib"]
 package = "pushit:{name}"
 
 [package.metadata.component.target.dependencies]
-"wasi:http" = "=0.2.0"
-"wasi:cli" = "=0.2.0"
+"wasi:http" = { path = "wit/deps/http" }
+"wasi:cli" = { path = "wit/deps/cli" }
+"wasi:io" = { path = "wit/deps/io" }
+"wasi:clocks" = { path = "wit/deps/clocks" }
 "#;
+
+// Reuse the pinned example interfaces without duplicating their source assets.
+const INIT_WIT_DEPS: &[(&str, &str)] = &[
+    (
+        "http/handler.wit",
+        include_str!("../../examples/hello/fn/wit/deps/http/handler.wit"),
+    ),
+    (
+        "http/proxy.wit",
+        include_str!("../../examples/hello/fn/wit/deps/http/proxy.wit"),
+    ),
+    (
+        "http/types.wit",
+        include_str!("../../examples/hello/fn/wit/deps/http/types.wit"),
+    ),
+    (
+        "cli/environment.wit",
+        include_str!("../../examples/hello/fn/wit/deps/cli/environment.wit"),
+    ),
+    (
+        "cli/imports.wit",
+        include_str!("../../examples/hello/fn/wit/deps/cli/imports.wit"),
+    ),
+    (
+        "io/error.wit",
+        include_str!("../../examples/hello/fn/wit/deps/io/error.wit"),
+    ),
+    (
+        "io/poll.wit",
+        include_str!("../../examples/hello/fn/wit/deps/io/poll.wit"),
+    ),
+    (
+        "io/streams.wit",
+        include_str!("../../examples/hello/fn/wit/deps/io/streams.wit"),
+    ),
+    (
+        "io/world.wit",
+        include_str!("../../examples/hello/fn/wit/deps/io/world.wit"),
+    ),
+    (
+        "clocks/monotonic-clock.wit",
+        include_str!("../../examples/hello/fn/wit/deps/clocks/monotonic-clock.wit"),
+    ),
+    (
+        "clocks/wall-clock.wit",
+        include_str!("../../examples/hello/fn/wit/deps/clocks/wall-clock.wit"),
+    ),
+    (
+        "clocks/world.wit",
+        include_str!("../../examples/hello/fn/wit/deps/clocks/world.wit"),
+    ),
+];
+const INIT_WIT_NOTICE: &str = include_str!("../../examples/hello/fn/wit/NOTICE.md");
 
 const INIT_LIB_RS: &str = r#"#[allow(warnings)]
 mod bindings;
@@ -1272,12 +1329,16 @@ fn init(args: InitArgs) -> Result<()> {
             .replace("{name}", &name),
     )?;
     write_new("fn/wit/world.wit", INIT_WIT.replace("{name}", &name))?;
+    for (path, content) in INIT_WIT_DEPS {
+        write_new(&format!("fn/wit/deps/{path}"), (*content).to_string())?;
+    }
+    write_new("fn/wit/NOTICE.md", INIT_WIT_NOTICE.to_string())?;
     write_new("fn/src/lib.rs", INIT_LIB_RS.to_string())?;
     write_new("ui/index.html", INIT_INDEX_HTML.replace("{name}", &name))?;
     write_new(
         "fn/.cargo/config.toml",
-        "[build]\ntarget = \"wasm32-wasip2\"\n".to_string(),
+        "[build]\ntarget = \"wasm32-wasip1\"\n".to_string(),
     )?;
-    println!("\nnext: pushit build && pushit --dev deploy");
+    println!("\nnext: pushit build; then deploy using an authorized profile, or use pushit --dev --server http://127.0.0.1:9100 deploy for a local controller");
     Ok(())
 }

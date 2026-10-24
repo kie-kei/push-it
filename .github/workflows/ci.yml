@@ -33,7 +33,7 @@ jobs:
 
       - name: Install pinned Rust toolchain
         run: |
-          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy --target wasm32-wasip2 --target wasm32-wasip1
           rustup override set 1.99.1
 
       - name: Check formatting and OIDC configuration
@@ -66,6 +66,11 @@ jobs:
         run: |
           cargo build --workspace --locked
           cargo build --manifest-path examples/hello/fn/Cargo.toml --release --target wasm32-wasip2 --locked
+
+      - name: Build fresh scaffold without a WIT registry
+        run: |
+          cargo install cargo-component --version 0.21.1 --locked
+          bash scripts/scaffold-smoke.sh
 
       - name: Production rejection and real WASM rollback smoke
         run: python3 scripts/security-e2e.py
