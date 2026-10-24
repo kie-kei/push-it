@@ -1196,6 +1196,9 @@ package = "pushit:{name}"
 "wasi:cli" = { path = "wit/deps/cli" }
 "wasi:io" = { path = "wit/deps/io" }
 "wasi:clocks" = { path = "wit/deps/clocks" }
+
+# Keep generated apps independent of any enclosing Cargo workspace.
+[workspace]
 "#;
 
 // Reuse the pinned example interfaces without duplicating their source assets.
