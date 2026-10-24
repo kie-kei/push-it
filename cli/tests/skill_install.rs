@@ -3,10 +3,19 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
-struct Sandbox(PathBuf);
+// Serialize executable-copy tests to avoid a possible fork/open-writer race
+// (a transient ETXTBSY was observed when these tests ran concurrently).
+static COPY_SPAWN: Mutex<()> = Mutex::new(());
+
+struct Sandbox {
+    path: PathBuf,
+    _guard: MutexGuard<'static, ()>,
+}
 impl Sandbox {
     fn new() -> Self {
+        let guard = COPY_SPAWN.lock().unwrap();
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(
             "pushit-skill-{}-{}",
@@ -17,14 +26,17 @@ impl Sandbox {
         fs::create_dir_all(path.join("project")).unwrap();
         // Exercise a distributed binary, not `cargo run` or the repository cwd.
         fs::copy(env!("CARGO_BIN_EXE_pushit"), path.join("pushit")).unwrap();
-        Self(path)
+        Self {
+            path,
+            _guard: guard,
+        }
     }
     fn run(&self, args: &[&str], answer: &str) -> String {
-        let mut child = Command::new(self.0.join("pushit"))
+        let mut child = Command::new(self.path.join("pushit"))
             .args(args)
-            .current_dir(self.0.join("project"))
+            .current_dir(self.path.join("project"))
             .env_clear()
-            .env("HOME", self.0.join("home"))
+            .env("HOME", self.path.join("home"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -43,7 +55,7 @@ impl Sandbox {
 }
 impl Drop for Sandbox {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).unwrap();
+        fs::remove_dir_all(&self.path).unwrap();
     }
 }
 
@@ -76,18 +88,18 @@ fn assert_bundle(dir: &Path) {
 fn installs_complete_user_bundle_without_touching_project() {
     let s = Sandbox::new();
     let output = s.run(&["skill", "install"], "yes\n");
-    let dest = s.0.join("home/.agents/skills/pushit");
+    let dest = s.path.join("home/.agents/skills/pushit");
     assert_bundle(&dest);
     assert!(output.contains(&dest.display().to_string()));
-    assert!(!s.0.join("project/.agents").exists());
-    assert!(!s.0.join("home/.agents/skill").exists());
+    assert!(!s.path.join("project/.agents").exists());
+    assert!(!s.path.join("home/.agents/skill").exists());
 }
 
 #[test]
 fn project_install_confirms_overwrite_and_preserves_unmanaged_files() {
     let s = Sandbox::new();
-    let dest = s.0.join("project/.agents/skills/pushit");
-    let legacy = s.0.join("project/.agents/skill/pushit");
+    let dest = s.path.join("project/.agents/skills/pushit");
+    let legacy = s.path.join("project/.agents/skill/pushit");
     fs::create_dir_all(&legacy).unwrap();
     fs::write(legacy.join("SKILL.md"), "legacy custom skill").unwrap();
     s.run(&["skill", "install", "--project"], "y\n");
@@ -115,7 +127,7 @@ fn project_install_confirms_overwrite_and_preserves_unmanaged_files() {
         fs::read_to_string(legacy.join("SKILL.md")).unwrap(),
         "legacy custom skill"
     );
-    assert!(!s.0.join("home/.agents").exists());
+    assert!(!s.path.join("home/.agents").exists());
 }
 
 #[test]
@@ -127,8 +139,8 @@ fn decline_creates_nothing_and_help_names_discoverable_paths() {
     ] {
         assert!(s.run(args, "\n").contains("aborted"));
     }
-    assert!(!s.0.join("home/.agents").exists());
-    assert!(!s.0.join("project/.agents").exists());
+    assert!(!s.path.join("home/.agents").exists());
+    assert!(!s.path.join("project/.agents").exists());
     let help = s.run(&["skill", "install", "--help"], "");
     assert!(help.contains(".agents/skills/pushit"));
     assert!(!help.contains(".agents/skill/"));
