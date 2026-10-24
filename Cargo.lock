@@ -3164,6 +3164,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "wasmtime",

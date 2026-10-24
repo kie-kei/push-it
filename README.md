@@ -86,3 +86,10 @@ HTTP-эндпоинт. См. `docs/sql.md`.
 Также `wasi:blobstore@0.2.0-draft` (opendal: s3/fs, `capabilities.blobstore` +
 `$PUSHIT_DATA/blobstores.yaml`, см. `docs/blobstore.md`) и
 `wasi:logging@0.1.0-draft` (структурный лог в per-app файл, `docs/logging.md`).
+
+## Безопасное обновление
+
+Перед обновлением существующей установки прочитайте
+[изменения авторизации, ключей сессий и rollback](docs/security-upgrade.md).
+Production теперь требует явно заданный надёжный `PUSHIT_SESSION_KEY`;
+исторические ревизии без сохранённого manifest нельзя безопасно откатывать.

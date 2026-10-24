@@ -20,9 +20,10 @@
 
 use anyhow::{bail, Context, Result};
 use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
 use sqlx::Column;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmtime::component::Resource;
 
@@ -38,9 +39,9 @@ mod bindings {
         },
     });
 }
+pub use bindings::wasi::sql::types::{DataType, Row};
 use wasmtime::component::HasSelf;
 use wasmtime_wasi::p2::IoView;
-pub use bindings::wasi::sql::types::{DataType, Row};
 
 use crate::runtime::ComponentCtx;
 
@@ -76,6 +77,31 @@ pub(crate) struct ClickHouse {
     http: reqwest::Client,
 }
 
+/// Cache credentials by digest, never by plaintext DSN. Secret rotations must
+/// select a new backend even when rolling back to an already-cached revision.
+pub(crate) type PoolKey = (PathBuf, String, [u8; 32]);
+
+fn pool_key(dir: &Path, name: &str, dsn: &str) -> PoolKey {
+    (
+        dir.to_path_buf(),
+        name.to_string(),
+        Sha256::digest(dsn.as_bytes()).into(),
+    )
+}
+
+fn local_dsn(data_dir: &Path, app: &str) -> Result<String> {
+    let db_dir = data_dir.join("appdata").join(app);
+    std::fs::create_dir_all(&db_dir).context("creating appdata directory")?;
+    let db_path = db_dir.join("local.db");
+    // Create on first use, but never truncate app data on reopen or rollback.
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&db_path)
+        .context("opening local.db")?;
+    Ok(format!("sqlite://{}", db_path.display()))
+}
+
 /// Everything a component invocation needs for wasi:sql.
 pub struct SqlCtx {
     /// Revision dir — scopes the shared pool cache.
@@ -88,9 +114,22 @@ pub struct SqlCtx {
     pub allowed: Vec<String>,
     /// connection name → dsn, resolved from deploy-time `sql_bindings`.
     pub dsns: HashMap<String, String>,
-    /// Shared with `Runtime`: (revision-dir, name) → backend.
-    pub(crate) pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<Backend>>>>,
+    /// Shared with `Runtime`: (revision-dir, name, DSN digest) → backend.
+    pub(crate) pools: Arc<Mutex<HashMap<PoolKey, Arc<Backend>>>>,
 }
+impl SqlCtx {
+    async fn backend(&self, name: &str, dsn: &str) -> Result<Arc<Backend>> {
+        let key = pool_key(&self.dir, name, dsn);
+        let cached = self.pools.lock().get(&key).cloned();
+        if let Some(backend) = cached {
+            return Ok(backend);
+        }
+        let backend = Arc::new(connect(dsn).await?);
+        let mut pools = self.pools.lock();
+        Ok(pools.entry(key).or_insert(backend).clone())
+    }
+}
+
 /// Resolve `capabilities.sql` grants into (allowed names, name → dsn).
 /// Grants: `local` (reserved, app-scoped sqlite) or plain logical names —
 /// each bound at deploy time (`sql_bindings`); `resolve` fetches the DSN
@@ -137,7 +176,7 @@ async fn connect(dsn: &str) -> Result<Backend> {
                 .max_connections(4)
                 .connect(dsn)
                 .await
-                .with_context(|| format!("connecting {dsn}"))?,
+                .context("connecting SQL backend")?,
         })),
         Driver::ClickHouse => Ok(Backend::ClickHouse(clickhouse_connect(dsn)?)),
     }
@@ -186,7 +225,11 @@ fn clickhouse_connect(dsn: &str) -> Result<ClickHouse> {
 }
 
 fn nonempty(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 /// Replace `?` placeholders with escaped ClickHouse string literals.
@@ -260,7 +303,11 @@ fn pg_rewrite(query: &str) -> String {
 
 async fn sqlx_query(b: &SqlxBackend, st: &SqlStatement) -> Result<Vec<Row>> {
     use sqlx::Row as _;
-    let sql = if b.pg { pg_rewrite(&st.query) } else { st.query.clone() };
+    let sql = if b.pg {
+        pg_rewrite(&st.query)
+    } else {
+        st.query.clone()
+    };
     let mut q = sqlx::query(&sql);
     for p in &st.params {
         q = q.bind(p.as_str());
@@ -279,7 +326,11 @@ async fn sqlx_query(b: &SqlxBackend, st: &SqlStatement) -> Result<Vec<Row>> {
 }
 
 async fn sqlx_exec(b: &SqlxBackend, st: &SqlStatement) -> Result<u32> {
-    let sql = if b.pg { pg_rewrite(&st.query) } else { st.query.clone() };
+    let sql = if b.pg {
+        pg_rewrite(&st.query)
+    } else {
+        st.query.clone()
+    };
     let mut q = sqlx::query(&sql);
     for p in &st.params {
         q = q.bind(p.as_str());
@@ -316,8 +367,8 @@ fn any_value(row: &sqlx::any::AnyRow, i: usize) -> DataType {
             .try_get::<i64, _>(i)
             .map(DataType::Int64)
             .unwrap_or(DataType::Null),
-        "FLOAT4" | "REAL" | "FLOAT8" | "DOUBLE" | "DOUBLE PRECISION" | "NUMERIC"
-        | "DECIMAL" | "FLOAT" => row
+        "FLOAT4" | "REAL" | "FLOAT8" | "DOUBLE" | "DOUBLE PRECISION" | "NUMERIC" | "DECIMAL"
+        | "FLOAT" => row
             .try_get::<f64, _>(i)
             .map(DataType::Double)
             .unwrap_or(DataType::Null),
@@ -382,9 +433,13 @@ fn ch_value(v: serde_json::Value) -> DataType {
         serde_json::Value::Bool(b) => DataType::Boolean(b),
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                i32::try_from(i).map(DataType::Int32).unwrap_or(DataType::Int64(i))
+                i32::try_from(i)
+                    .map(DataType::Int32)
+                    .unwrap_or(DataType::Int64(i))
             } else if let Some(u) = n.as_u64() {
-                u32::try_from(u).map(DataType::Uint32).unwrap_or(DataType::Uint64(u))
+                u32::try_from(u)
+                    .map(DataType::Uint32)
+                    .unwrap_or(DataType::Uint64(u))
             } else {
                 DataType::Double(n.as_f64().unwrap_or(f64::NAN))
             }
@@ -412,18 +467,17 @@ fn authorize<'m>(
     dsns: &'m HashMap<String, String>,
 ) -> Result<Option<&'m str>, String> {
     if !allowed.iter().any(|a| a == name) {
-        return Err(format!("connection '{name}' not granted by capabilities.sql"));
+        return Err(format!(
+            "connection '{name}' not granted by capabilities.sql"
+        ));
     }
     if name == "local" {
         return Ok(None); // signal to use built-in local DSN
     }
-    dsns.get(name)
-        .map(|s| Some(s.as_str()))
-        .ok_or_else(|| {
-            format!("connection '{name}' has no DSN — check the deploy manifest's sql: binding")
-        })
+    dsns.get(name).map(|s| Some(s.as_str())).ok_or_else(|| {
+        format!("connection '{name}' has no DSN — check the deploy manifest's sql: binding")
+    })
 }
-
 
 impl bindings::wasi::sql::types::HostConnection for ComponentCtx {
     async fn open(&mut self, name: String) -> Result<Resource<SqlConn>, Resource<SqlError>> {
@@ -433,31 +487,14 @@ impl bindings::wasi::sql::types::HostConnection for ComponentCtx {
         };
         let dsn = match dsn_opt {
             Some(d) => d.to_string(),
-            None => {
-                // local: build DSN on the fly using data_dir
-                let db_dir = self.sql.data_dir.join("appdata").join(&self.sql.app_name);
-                if let Err(e) = std::fs::create_dir_all(&db_dir) {
-                    return Err(self.sql_err(format!("failed to create appdata dir: {e}")));
-                }
-                let db_path = db_dir.join("local.db");
-                // sqlx sqlite won't create the file; an empty file is a valid db
-                std::fs::File::create(&db_path)
-                    .map_err(|e| return self.sql_err(format!("failed to create local.db: {e}")))?;
-                format!("sqlite://{}", db_path.display())
-            }
-        };
-        let key = (self.sql.dir.clone(), name.clone());
-        let cached = self.sql.pools.lock().get(&key).cloned();
-        let backend = match cached {
-            Some(b) => b,
-            None => match connect(&dsn).await {
-                Ok(b) => {
-                    let b = Arc::new(b);
-                    self.sql.pools.lock().insert(key, b.clone());
-                    b
-                }
+            None => match local_dsn(&self.sql.data_dir, &self.sql.app_name) {
+                Ok(dsn) => dsn,
                 Err(e) => return Err(self.sql_err(format!("{e:#}"))),
             },
+        };
+        let backend = match self.sql.backend(&name, &dsn).await {
+            Ok(backend) => backend,
+            Err(e) => return Err(self.sql_err(format!("{e:#}"))),
         };
         self.table()
             .push(SqlConn(backend))
@@ -581,6 +618,82 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reopening_local_database_preserves_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let dsn = local_dsn(dir.path(), "a").unwrap();
+        let db_path = dir.path().join("appdata/a/local.db");
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        db.execute_batch("CREATE TABLE data(value TEXT); INSERT INTO data VALUES('retained');")
+            .unwrap();
+        drop(db);
+        for _ in 0..3 {
+            assert_eq!(local_dsn(dir.path(), "a").unwrap(), dsn);
+        }
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        assert_eq!(
+            db.query_row("SELECT value FROM data", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "retained"
+        );
+    }
+
+    #[tokio::test]
+    async fn rotated_dsn_uses_current_secret_on_cached_revision() {
+        sqlx::any::install_default_drivers();
+        let dir = tempfile::tempdir().unwrap();
+        let old_dsn = local_dsn(dir.path(), "old-secret-target").unwrap();
+        let new_dsn = local_dsn(dir.path(), "new-secret-target").unwrap();
+        let ctx = SqlCtx {
+            dir: dir.path().join("revision-a"),
+            data_dir: dir.path().to_path_buf(),
+            app_name: "a".into(),
+            allowed: vec!["db".into()],
+            dsns: HashMap::new(),
+            pools: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let old = ctx.backend("db", &old_dsn).await.unwrap();
+        let current = ctx.backend("db", &new_dsn).await.unwrap();
+        assert!(!Arc::ptr_eq(&old, &current));
+        assert!(Arc::ptr_eq(
+            &current,
+            &ctx.backend("db", &new_dsn).await.unwrap()
+        ));
+        let Backend::Sqlx(old) = &*old else {
+            panic!("expected sqlite");
+        };
+        let Backend::Sqlx(current) = &*current else {
+            panic!("expected sqlite");
+        };
+        sqlx::query("CREATE TABLE data(value TEXT)")
+            .execute(&old.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO data VALUES('old')")
+            .execute(&old.pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE data(value TEXT)")
+            .execute(&current.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO data VALUES('current')")
+            .execute(&current.pool)
+            .await
+            .unwrap();
+        let current_value: (String,) = sqlx::query_as("SELECT value FROM data")
+            .fetch_one(&current.pool)
+            .await
+            .unwrap();
+        assert_eq!(current_value.0, "current");
+        assert_ne!(
+            pool_key(&ctx.dir, "db", &old_dsn),
+            pool_key(&ctx.dir, "db", &new_dsn)
+        );
+        // The cache key holds only a fixed-length digest, not secret DSN bytes.
+        assert_eq!(pool_key(&ctx.dir, "db", &new_dsn).2.len(), 32);
+    }
+
+    #[test]
     fn resolve_grants_mixed() {
         let grants = vec!["local".to_string(), "db".to_string()];
         let (allowed, dsns) = resolve_grants(&grants, "myapp", |name| {
@@ -619,17 +732,27 @@ mod tests {
         let allowed = vec!["sl".to_string()];
         let mut dsns = HashMap::new();
         dsns.insert("sl".to_string(), "sqlite:///tmp/x.db".to_string());
-        assert_eq!(authorize("sl", &allowed, &dsns).unwrap().unwrap(), "sqlite:///tmp/x.db");
+        assert_eq!(
+            authorize("sl", &allowed, &dsns).unwrap().unwrap(),
+            "sqlite:///tmp/x.db"
+        );
         // not granted
-        assert!(authorize("pg", &allowed, &dsns).unwrap_err().contains("not granted"));
+        assert!(authorize("pg", &allowed, &dsns)
+            .unwrap_err()
+            .contains("not granted"));
         // granted but no dsn configured
         let allowed2 = vec!["sl".to_string(), "pg".to_string()];
-        assert!(authorize("pg", &allowed2, &dsns).unwrap_err().contains("has no DSN"));
+        assert!(authorize("pg", &allowed2, &dsns)
+            .unwrap_err()
+            .contains("has no DSN"));
         // granted but nothing configured at all
         assert!(authorize("sl", &allowed, &HashMap::new()).is_err());
         // local is reserved: granted via manifest, resolves without a DSN
         let allowed3 = vec!["local".to_string()];
-        assert_eq!(authorize("local", &allowed3, &HashMap::new()).unwrap(), None);
+        assert_eq!(
+            authorize("local", &allowed3, &HashMap::new()).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -675,5 +798,4 @@ mod tests {
         assert_eq!(c.url, "http://ch:8123/?default_format=JSONEachRow");
         assert!(c.user.is_none());
     }
-
 }

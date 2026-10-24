@@ -1,3 +1,6 @@
+use crate::blob_host::{self, BlobCtx};
+use crate::log_host::{self, LogCtx};
+use crate::sql_host::{self, SqlCtx};
 use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -10,14 +13,11 @@ use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::types::HostFutureIncomingResponse;
-use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
-use crate::blob_host::{self, BlobCtx};
-use crate::log_host::{self, LogCtx};
-use crate::sql_host::{self, SqlCtx};
 
 /// Host capabilities for one component invocation, resolved by the caller
 /// (manifest grants + resource maps + the app log sink).
@@ -61,18 +61,21 @@ impl WasiHttpView for ComponentCtx {
         config: wasmtime_wasi_http::types::OutgoingRequestConfig,
     ) -> wasmtime_wasi_http::HttpResult<HostFutureIncomingResponse> {
         if !self.allow_http_out {
-            return Err(wasmtime_wasi_http::bindings::http::types::ErrorCode::HttpRequestDenied
-                .into());
+            return Err(
+                wasmtime_wasi_http::bindings::http::types::ErrorCode::HttpRequestDenied.into(),
+            );
         }
-        Ok(wasmtime_wasi_http::types::default_send_request(request, config))
+        Ok(wasmtime_wasi_http::types::default_send_request(
+            request, config,
+        ))
     }
 }
 
 /// Wasmtime host: one engine, cached `ProxyPre` per artifact dir.
 pub struct Runtime {
     engine: Engine,
-    /// (revision-dir, connection-name) → backend pool, shared across calls.
-    sql_pools: Arc<Mutex<HashMap<(PathBuf, String), Arc<sql_host::Backend>>>>,
+    /// (revision-dir, connection-name, DSN digest) → backend pool.
+    sql_pools: Arc<Mutex<HashMap<sql_host::PoolKey, Arc<sql_host::Backend>>>>,
     pre: Mutex<HashMap<PathBuf, Arc<ProxyPre<ComponentCtx>>>>,
     pub timeout: Duration,
 }
