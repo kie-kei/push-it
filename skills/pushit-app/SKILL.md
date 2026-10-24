@@ -5,20 +5,141 @@ description: Build, deploy, and debug PushIt platform apps with the pushit CLI. 
 
 # PushIt app development with the `pushit` CLI
 
-PushIt deploys apps as **WASM components + static UI** to a single-VM controller. An app = a Rust crate compiled with `cargo component` to `wasm32-wasip2` (exporting `wasi:http/incoming-handler@0.2`) plus a `dist/` of static assets. The `pushit` CLI is the only tool needed.
+PushIt deploys apps as **WASM components + static UI** to a single-VM controller. An app = a Rust crate built with `cargo component` into a WASI 0.2 component (exporting `wasi:http/incoming-handler@0.2`) plus a `dist/` of static assets. With cargo-component 0.21.1, Rust compilation uses `wasm32-wasip1`; cargo-component adapts that output into the final component. The compile target is not the deployed ABI: do not deploy a bare WASI 0.1 core module. The CLI orchestrates local builds; it does not replace the Rust toolchain or tools named in the manifest.
 
-## Golden path for a new app
+## Prerequisites
+
+Rust/rustup + Cargo (CI pins **1.99.1**), the `wasm32-wasip1`
+target, **cargo-component 0.21.1**, and `curl`. The Rust crate registry (and
+any custom dependency sources) must be reachable. Node.js/npm are needed only when a custom `build.ui` uses them;
+Git is needed for root-manifest repository deployments. The generated UI is
+plain static HTML and the scaffold declares no secrets. The scaffold vendors
+pinned WASI 0.2 WIT dependencies under `fn/wit/deps/` with local Cargo metadata
+path references, so those interfaces do not require a WIT registry. Preserve
+the included NOTICE and license notices when copying or updating these files.
+
+For registry TLS trust failures (for example, `UnknownIssuer`), keep certificate
+verification enabled. Have the operator configure the correct trusted CA and
+registry access using supported tool configuration; do not use insecure TLS
+bypasses. Report the blocked dependency-fetch/build stage rather than claiming
+the full path has passed.
+
+## Golden path: installed CLI and an existing instance
+
+Use the installed `pushit` CLI and an **authorized existing instance**; a source
+checkout and a local controller are not required. Confirm the deployment target
+and choose a unique app name with the user before creating or replacing an app.
+The commands below assume an existing authenticated profile; replace `myapp`
+with the agreed name throughout if it is already in use.
 
 ```bash
-mkdir myapp && cd myapp
-pushit init                # scaffold: pushit.yaml, fn/, ui/
-pushit build               # runs build.fn/build.ui from the manifest + verifies artifacts
-pushit --dev deploy        # upload and activate
+set -euo pipefail
+[ ! -f "$HOME/.cargo/env" ] || source "$HOME/.cargo/env"
+command -v pushit
+rustup toolchain install 1.99.1 --profile minimal
+rustup target add wasm32-wasip1 --toolchain 1.99.1
+cargo +1.99.1 install cargo-component --version 0.21.1 --locked
+# Use the selected profile's credentials, not inherited environment overrides.
+unset PUSHIT_TOKEN PUSHIT_PROFILE PUSHIT_DEV PUSHIT_SERVER
+read -r -p 'Existing authorized profile name: ' APP_PROFILE
+pushit profile show "$APP_PROFILE"  # verify its server before proceeding
+# If authentication is missing/expired: pushit --profile "$APP_PROFILE" login
+pushit --profile "$APP_PROFILE" list  # read-only authentication/target check
+cd "$(mktemp -d /tmp/pushit-app.XXXXXX)"
+export RUSTUP_TOOLCHAIN=1.99.1
+pushit init myapp
+cd myapp
+pushit build && pushit --profile "$APP_PROFILE" deploy
+pushit --profile "$APP_PROFILE" status myapp
+pushit --profile "$APP_PROFILE" logs myapp
 ```
 
-The routine loop is exactly two commands: `pushit build` (or just `pushit deploy` when artifacts are already built) and `pushit --dev deploy`. No extra tooling — the CLI reads `build:` commands out of `pushit.yaml`, so the manifest is both the IaC unit and the build definition.
+If no profile exists, first register the operator-provided server with
+`pushit profile add <name> --server <authorized-https-url>` and authenticate via
+`pushit --profile <name> login`; do not guess a production endpoint or use
+`--dev`. Explicit `--server` changes only the destination, not the resolved token.
 
-**Local iteration without a controller:** `pushit dev` runs the component on the *same* wasmtime host as the platform (wasi:sql/blobstore/logging, `local` sqlite, 30s timeout) at `http://127.0.0.1:9101` — `/_fn/*` goes to the component, everything else serves `ui_dist`. Secrets/env: `--env KEY=value`; DSNs for non-`local` sql connections: `--dsn name='postgres://…'`; outgoing HTTP: `--http-out`. Use it for fast function testing; deploy to a real controller to test auth, hub, and revisions.
+Verify the deployed app over HTTP using the operator-confirmed app URL:
+open `/` and `/_fn/hello` in a browser authenticated to that app host. Expect a
+`myapp` heading and `{"msg":"hello"}`, then check status and logs. Production
+app routes require the browser session cookie: a CLI Bearer token authenticates
+management APIs, **not** app UI/function routes. Do not treat an unauthenticated
+curl redirect/login page as a successful app check. If using curl, use an
+authorized app-host session cookie jar and `curl -fsS -b <cookie-jar> <app-url>`
+(and `<app-url>/_fn/hello`); validate the expected body, not just the exit status.
+Never print or commit cookies. Report any auth/HTTP check still pending.
+
+A nonzero build, deploy, or verification exit is failure: diagnose the error,
+fix it, and repeat checks. Never claim success from an attempted command alone.
+
+## Optional: source-based local dev sandbox
+
+Use this only to test locally without production authentication. It requires a
+source checkout and builds both CLI and controller. For the source quickstart,
+follow these steps instead of the existing-instance path above.
+
+From the cloned PushIt repository root, in Bash:
+
+```bash
+set -euo pipefail
+[ ! -f "$HOME/.cargo/env" ] || source "$HOME/.cargo/env"
+rustup toolchain install 1.99.1 --profile minimal
+rustup override set 1.99.1
+rustup target add wasm32-wasip1 --toolchain 1.99.1
+cargo +1.99.1 install cargo-component --version 0.21.1 --locked
+cargo build --locked -p pushit -p pushit-controller
+export PUSHIT_REPO="$PWD"
+export PATH="$PUSHIT_REPO/target/debug:$PATH"
+```
+
+In a separate terminal at the repository root, start the controller and leave
+it running; wait until it is listening:
+
+```bash
+PUSHIT_DEV=1 PUSHIT_BIND=127.0.0.1:9100 PUSHIT_BASE_DOMAIN=localhost \
+  PUSHIT_DATA="$(mktemp -d /tmp/pushit-data.XXXXXX)" \
+  ./target/debug/pushit-controller
+```
+
+Back in the terminal with the exported `PATH`, create the app **outside the
+repository Cargo workspace**:
+
+```bash
+set -euo pipefail
+# Isolate this sandbox from saved profiles/tokens and inherited auth flags.
+export XDG_CONFIG_HOME="$(mktemp -d /tmp/pushit-config.XXXXXX)"
+unset PUSHIT_TOKEN PUSHIT_PROFILE PUSHIT_DEV PUSHIT_SERVER
+cd "$(mktemp -d /tmp/pushit-app.XXXXXX)"
+export RUSTUP_TOOLCHAIN=1.99.1  # repository rustup override no longer applies
+pushit init myapp
+cd myapp
+pushit build && pushit --dev --server http://127.0.0.1:9100 deploy
+curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/ | grep -F '<h1>myapp</h1>'
+curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/_fn/hello | grep -Fx '{"msg":"hello"}'
+pushit --dev --server http://127.0.0.1:9100 status myapp
+pushit --dev --server http://127.0.0.1:9100 logs myapp
+```
+
+Verify the UI has a `myapp` heading, the function returns `{"msg":"hello"}`,
+and status shows the active revision. A nonzero build/deploy/check exit is a
+failure, not success: inspect the error and logs, fix the cause, then repeat the
+checks. Never report success based only on an attempted command. Stop the
+controller with Ctrl-C when done; temporary directories remain for inspection.
+
+For a **single-app manifest**, deploy uploads existing artifacts; it does not
+build them. The normal loop is `pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`. Only a **root manifest** (`apps:`) automatically
+syncs repositories and builds before deploying. `build.fn`/`build.ui` are local
+shell commands and their tools must be installed.
+
+Dev mode bypasses auth: keep the controller loopback-only. The controller's
+inline `PUSHIT_DEV=1` does not configure a separately invoked CLI; pass `--dev`
+and an explicit `--server` for every local controller command. `--server` alone
+does not prevent sending an active production token: the temporary
+`XDG_CONFIG_HOME` and unset auth variables above isolate sandbox credentials.
+Use a dedicated terminal and close it before returning to normal profiles.
+Dev checks cannot validate production OIDC/auth.
+
+**Local iteration without a controller:** `pushit dev` runs the component on the *same* wasmtime host as the platform (wasi:sql/blobstore/logging, `local` sqlite, 30s timeout) at `http://127.0.0.1:9101` — `/_fn/*` goes to the component, everything else serves `ui_dist`. Secrets/env: `--env KEY=value`; DSNs for non-`local` sql connections: `--dsn name='postgres://…'`; outgoing HTTP: `--http-out`. Use it for fast function testing; deploy to a controller to test hub/revisions, and an authenticated non-dev instance to test auth.
 
 ## Deploying multiple apps from one manifest (repos + one command)
 
@@ -64,7 +185,7 @@ myapp/
 
 ```yaml
 name: myapp                      # → myapp.<base-domain>
-entry: fn/target/wasm32-wasip2/release/myapp.wasm
+entry: fn/target/wasm32-wasip1/release/myapp.wasm
 env:                             # non-secret config; reaches fn as env vars
   GREETING: hi
 secrets:                         # names only — values are set via `pushit secret set`
@@ -75,7 +196,7 @@ capabilities:                    # what the component is allowed to import/use
   sql: [local]                   # 'local' = built-in per-app sqlite; other names are bound to secret sources at deploy (root manifest sql:)
   blobstore: [files]             # logical stores from blobstores.yaml
 build:
-  fn: cd fn && cargo component build --release --target wasm32-wasip2
+  fn: cd fn && cargo component build --release --target wasm32-wasip1
   ui: cd ui && npm ci && npm run build   # optional, only if UI needs a build step
   ui_dist: ui/dist
 ```
@@ -108,24 +229,24 @@ If a component imports an interface NOT granted in `capabilities`, the request f
 ## Everyday commands
 
 ```bash
-pushit build                          # run build.fn/build.ui + verify artifacts exist
+pushit build                          # run build steps; require wasm (missing UI only warns)
 pushit dev                            # local runtime, no controller (see Testing)
-pushit --dev deploy                   # upload manifest + app.wasm + dist/
-pushit --dev list                     # all apps
-pushit --dev status myapp             # detail + revision history
-pushit --dev logs myapp               # last 200 lines
-pushit --dev logs -f myapp            # live stream (SSE) — run in background while reproducing
-pushit --dev secret set myapp K=V     # set/update secret value
-pushit --dev secret ls myapp          # names only
-pushit --dev rollback myapp           # previous revision
-pushit --dev rollback myapp --revision <id>
+pushit --dev --server http://127.0.0.1:9100 deploy                   # upload manifest + app.wasm + dist/
+pushit --dev --server http://127.0.0.1:9100 list                     # all apps
+pushit --dev --server http://127.0.0.1:9100 status myapp             # detail + revision history
+pushit --dev --server http://127.0.0.1:9100 logs myapp               # last 200 lines
+pushit --dev --server http://127.0.0.1:9100 logs -f myapp            # live stream (SSE) — run in background while reproducing
+pushit --dev --server http://127.0.0.1:9100 secret set myapp K=V     # set/update secret value
+pushit --dev --server http://127.0.0.1:9100 secret ls myapp          # names only
+pushit --dev --server http://127.0.0.1:9100 rollback myapp           # previous revision
+pushit --dev --server http://127.0.0.1:9100 rollback myapp --revision <id>
 pushit profile add prod --server https://pushit.example.com   # register instance
 pushit login --profile prod           # auth flow for that profile
 pushit profile use prod               # make active (default for all commands)
 pushit --profile stage <cmd>          # one-off via another profile, no switching
 ```
 
-`--dev` sends `X-Pushit-Dev: 1` — use against a dev controller (`PUSHIT_DEV=1`). For production: run `pushit login` once (browser → long-lived token in `~/.config/pushit/token`, reused automatically, ~1 year; `--token <jwt>` / `PUSHIT_TOKEN` still work and take precedence), plus `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`). Multiple push-it instances: `pushit profile add <name> --server <url>` → `pushit login --profile <name>` → `pushit profile use <name>` (active), `pushit --profile <name> <cmd>` for a one-off against another instance, `pushit profile list|show|remove` to manage.
+`--dev` sends `X-Pushit-Dev: 1` — use only against a local dev controller (`PUSHIT_DEV=1`), with `--server http://127.0.0.1:9100`. For production: run `pushit login` once (browser → long-lived token in `~/.config/pushit/token`, reused automatically, ~1 year; `--token <jwt>` / `PUSHIT_TOKEN` still work and take precedence), plus `--server <url>` / `PUSHIT_SERVER` (default `http://localhost:9100`). Token resolution is `--token` > `PUSHIT_TOKEN` > nonempty selected/active profile token > legacy saved token. `--dev` is independent: a dev header and a resolved Bearer token can both be sent. Server resolution is `--server` > `PUSHIT_SERVER` > selected/active profile server > `http://localhost:9100`. Multiple push-it instances: `pushit profile add <name> --server <url>` → `pushit login --profile <name>` → `pushit profile use <name>` (active), `pushit --profile <name> <cmd>` for a one-off against another instance, `pushit profile list|show|remove` to manage.
 
 ## Testing and iterating
 
@@ -137,7 +258,7 @@ pushit dev --env KEY=value --dsn db='postgres://…' --http-out
 curl http://127.0.0.1:9101/_fn/hello                # exercise the function
 ```
 
-This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:sql/blobstore/logging), same `local` sqlite, same 30s timeout — what passes locally passes on the platform, minus auth/hub. Go to the controller (`pushit build && pushit --dev deploy`) only when you need to verify auth, the hub, revisions/rollback, or real bound secrets.
+This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:sql/blobstore/logging), same `local` sqlite, same 30s timeout — local success is useful evidence, not a guarantee of a successful platform deployment (configuration, capabilities, secrets, auth, and routing can differ). Go to the controller (`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`) to verify the hub, revisions/rollback, or bound secrets; use an authenticated non-dev instance to verify production auth.
 
 ## Debugging a deployed app
 
@@ -149,7 +270,7 @@ This is the default way to develop and debug `/_fn/*` logic: same host functions
 
 ## Making changes to an existing app
 
-Edit code → verify with `pushit dev` (fast, local), then `pushit build && pushit --dev deploy` when the change should land (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
+Edit code → verify with `pushit dev` (fast, local), then `pushit build && pushit --dev --server http://127.0.0.1:9100 deploy` when the change should land (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
 
 ## Common failures and fixes
 

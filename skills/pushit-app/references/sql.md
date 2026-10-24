@@ -5,8 +5,12 @@
 Components can query databases through host functions instead of raw
 sockets. The guest imports `wasi:sql@0.2.0-draft` (`types` + `readwrite`);
 the controller resolves *logical* connection names to real databases.
-DSNs and credentials live in a platform-side file — never in component
-env vars, manifests, or secrets.
+For non-`local` connections, DSNs live in encrypted app-private or
+platform-wide secrets. The deployer binds logical names to secret sources
+(`secret:<app-secret-key>` or `platform:<global-secret-name>`); manifests
+contain source references, not credential values. The SQL host resolves
+these secrets and connects on behalf of the component without exposing
+the DSN to it. The reserved `local` connection needs no DSN secret.
 
 ## Contract
 
@@ -127,5 +131,7 @@ resource; `error.trace()` yields the message. Connections failed at
 
 ## Example
 
-`examples/hello` declares `capabilities.sql: [sl]`; its `/_fn/sql`
-route creates a table, inserts a row, selects it back over sqlite.
+`examples/hello` declares `capabilities.sql: [local]`; its `/_fn/sql`
+route opens `connection.open("local")`, creates a table, inserts a row,
+and selects it back over the app-scoped sqlite database. No SQL binding
+or DSN secret is needed for `local`.

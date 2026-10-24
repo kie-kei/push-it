@@ -34,22 +34,79 @@ pushit skill install --project   # ./.agents/skills/pushit/ в текущем к
 
 ## Quickstart (dev)
 
+Нужны Rust/rustup и Cargo (CI использует Rust **1.99.1**), `curl` и
+`cargo-component` **0.21.1**. Команды ниже — для Bash, начиная из корня
+клонированного репозитория PushIt. Сборка требует доступа к реестру Rust-крейтов
+(и к источникам дополнительных зависимостей вашего приложения).
+Node.js/npm для сгенерированного статичного UI не нужны. Scaffold включает
+закреплённые WIT-зависимости WASI 0.2 в `fn/wit/deps/`: отдельный WIT-реестр
+для них не нужен. Сохраняйте включённый файл NOTICE и лицензионные уведомления.
+`cargo-component` 0.21.1 использует Rust-цель `wasm32-wasip1` и адаптирует
+результат в WASI 0.2-компонент (`wasi:http`); это не деплой core-модуля WASI 0.1.
+
 ```bash
-source ~/.cargo/env
-
-# 1. Контроллер
-PUSHIT_DEV=1 PUSHIT_DATA=/tmp/pushit cargo run -p pushit-controller
-
-# 2. Новое приложение
-pushit init myapp && cd myapp
-pushit secret set myapp MY_TOKEN=secret123   # если манифест требует
-pushit deploy
-
-# 3. Проверка
-curl -H 'Host: myapp.localhost' http://localhost:9100/          # UI
-curl -H 'Host: myapp.localhost' http://localhost:9100/_fn/hello # функция
-pushit logs myapp
+set -euo pipefail
+[ ! -f "$HOME/.cargo/env" ] || source "$HOME/.cargo/env"
+rustup toolchain install 1.99.1 --profile minimal
+rustup override set 1.99.1
+rustup target add wasm32-wasip1 --toolchain 1.99.1
+cargo +1.99.1 install cargo-component --version 0.21.1 --locked
+cargo build --locked -p pushit -p pushit-controller
+export PUSHIT_REPO="$PWD"
+# Абсолютный PATH сохраняет доступ к CLI после перехода в каталог приложения.
+export PATH="$PUSHIT_REPO/target/debug:$PATH"
 ```
+
+**Терминал 1:** из того же корня репозитория запустите контроллер и оставьте
+его работать (дождитесь сообщения о прослушивании порта):
+
+```bash
+PUSHIT_DEV=1 PUSHIT_BIND=127.0.0.1:9100 PUSHIT_BASE_DOMAIN=localhost \
+  PUSHIT_DATA="$(mktemp -d /tmp/pushit-data.XXXXXX)" \
+  ./target/debug/pushit-controller
+```
+
+Dev-режим отключает аутентификацию: используйте его только локально, не
+выставляйте этот контроллер в сеть. Префикс `PUSHIT_DEV=1` выше действует только
+на процесс контроллера, не на CLI в другом терминале.
+
+**Терминал 2:** продолжайте в терминале с подготовленным `PATH` из первого
+блока. Создайте приложение вне Cargo workspace репозитория:
+
+```bash
+set -euo pipefail
+# Isolate this sandbox from saved profiles/tokens and inherited auth flags.
+export XDG_CONFIG_HOME="$(mktemp -d /tmp/pushit-config.XXXXXX)"
+unset PUSHIT_TOKEN PUSHIT_PROFILE PUSHIT_DEV PUSHIT_SERVER
+APP_PARENT="$(mktemp -d /tmp/pushit-app.XXXXXX)"
+cd "$APP_PARENT"
+# rustup override репозитория не действует вне него.
+export RUSTUP_TOOLCHAIN=1.99.1
+pushit init myapp
+cd myapp
+pushit build && pushit --dev --server http://127.0.0.1:9100 deploy
+
+curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/ | grep -F '<h1>myapp</h1>'
+curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/_fn/hello | grep -Fx '{"msg":"hello"}'
+pushit --dev --server http://127.0.0.1:9100 status myapp
+pushit --dev --server http://127.0.0.1:9100 logs myapp
+```
+
+Ожидается UI с заголовком `myapp`, ответ функции `{"msg":"hello"}` и активная
+ревизия в `status`. Scaffold не требует секретов (`secrets: []`). Для одного
+приложения `deploy` **не запускает сборку**: после изменений повторяйте
+`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`.
+Не считайте деплой успешным при ненулевом коде выхода или неуспешных проверках;
+проверьте вывод команды и логи, исправьте причину и повторите проверку.
+При ошибке доверия TLS при загрузке зависимостей не отключайте проверку
+сертификатов: согласуйте доверенный CA и доступ к реестру с оператором через
+поддерживаемую конфигурацию инструмента. Пока загрузка/сборка заблокирована,
+так и сообщайте — это не успешный деплой.
+Dev-проверки не проверяют production OIDC/auth. `--server` сам по себе не
+отключает токен активного профиля: временный `XDG_CONFIG_HOME` и `unset` выше
+изолируют CLI от production-учётных данных. Выполняйте этот sandbox в отдельном
+терминале; закройте его перед возвратом к обычным профилям.
+Остановить контроллер можно через Ctrl-C; временные каталоги оставлены для осмотра.
 
 ### Аутентификация и профили
 
@@ -58,7 +115,11 @@ pushit login    # один раз: браузер → Keycloak → долгож�
 ```
 
 Токен хранится в `~/.config/pushit/token` (0600) и используется автоматически;
-приоритет: `--token` > `PUSHIT_TOKEN` > сохранённый токен > `--dev`.
+приоритет токена: `--token` > `PUSHIT_TOKEN` > непустой токен выбранного/активного
+профиля > сохранённый legacy-токен. `--dev` — отдельный флаг dev-заголовка,
+а не источник токена; он может отправляться одновременно с Bearer-токеном.
+На production не используйте `--dev`: укажите сервер и выполните login
+для нужного профиля.
 Ротация — повторный `pushit login`.
 
 Несколько инстансов — профили (файл `~/.config/pushit/profiles.toml`, 0600):
