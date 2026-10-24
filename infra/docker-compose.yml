@@ -48,6 +48,9 @@ services:
       KC_HOSTNAME: ${KC_HOSTNAME:-auth.apps.internal.lan}
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
+      # Realm import resolves this inside Keycloak, not on the Compose host.
+      # Keep optional here so controller-only dev does not require OIDC secrets.
+      PUSHIT_OIDC_CLIENT_SECRET: ${PUSHIT_OIDC_CLIENT_SECRET:-}
     command: start --import-realm
     volumes:
       - keycloak_data:/opt/keycloak/data
