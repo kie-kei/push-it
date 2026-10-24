@@ -1339,6 +1339,6 @@ fn init(args: InitArgs) -> Result<()> {
         "fn/.cargo/config.toml",
         "[build]\ntarget = \"wasm32-wasip1\"\n".to_string(),
     )?;
-    println!("\nnext: pushit build && pushit --dev deploy");
+    println!("\nnext: pushit build; then deploy using an authorized profile, or use pushit --dev --server http://127.0.0.1:9100 deploy for a local controller");
     Ok(())
 }

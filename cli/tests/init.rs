@@ -10,6 +10,10 @@ fn scaffold_build_target_and_deploy_entry_match_cargo_component_output() {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("pushit --dev --server http://127.0.0.1:9100 deploy"));
+    assert!(stdout.contains("authorized profile"));
+    assert!(!stdout.contains("pushit --dev deploy"));
     let app = root.join("hello-app");
     let manifest: serde_yaml::Value =
         serde_yaml::from_str(&fs::read_to_string(app.join("pushit.yaml")).unwrap()).unwrap();
