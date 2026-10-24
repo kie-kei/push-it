@@ -42,6 +42,7 @@ struct PendingLogin {
 
 pub struct Auth {
     pub cfg: Config,
+    pub local: Option<std::sync::Arc<crate::local_auth::LocalAuth>>,
     /// In-memory, short-lived one-time login challenges; restart invalidates pending logins.
     states: Mutex<HashMap<String, PendingLogin>>,
     /// cached JWKS keys: kid -> DecodingKey
@@ -51,12 +52,25 @@ pub struct Auth {
 
 impl Auth {
     pub fn new(cfg: Config) -> Self {
-        Auth {
+        Self::try_new(cfg).expect("initialize auth")
+    }
+
+    pub fn try_new(cfg: Config) -> Result<Self> {
+        let local = if cfg.auth_mode == crate::config::AuthMode::Local {
+            crate::config::validate_local(&cfg.base_domain, &cfg.bind)?;
+            Some(std::sync::Arc::new(crate::local_auth::LocalAuth::open(
+                &cfg.data_dir,
+            )?))
+        } else {
+            None
+        };
+        Ok(Auth {
             cfg,
+            local,
             states: Mutex::new(HashMap::new()),
             jwks: Mutex::new(HashMap::new()),
             http: reqwest::Client::new(),
-        }
+        })
     }
 
     pub fn dev_bypass(&self, _headers: &HeaderMap) -> bool {
@@ -123,6 +137,11 @@ impl Auth {
     }
 
     pub fn user_from_headers(&self, headers: &HeaderMap) -> Option<User> {
+        if let Some(local) = &self.local {
+            let authority = headers.get(axum::http::header::HOST)?.to_str().ok()?;
+            let hub = authority.split(':').next() == Some("hub.localhost");
+            return local.browser_user(headers, authority, hub);
+        }
         let c = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
         for pair in c.split(';') {
             let mut kv = pair.trim().splitn(2, '=');
@@ -138,6 +157,9 @@ impl Auth {
     // ---- long-lived API bearer (same HMAC format) ----
 
     pub fn verify_api_token(&self, headers: &HeaderMap) -> Option<User> {
+        if let Some(local) = &self.local {
+            return local.bearer_user(headers);
+        }
         let h = headers
             .get(axum::http::header::AUTHORIZATION)?
             .to_str()
@@ -353,6 +375,9 @@ impl Auth {
     // ---- Bearer JWT for API ----
 
     pub async fn verify_bearer(&self, headers: &HeaderMap) -> Result<Option<User>> {
+        if self.local.is_some() {
+            return Ok(None);
+        }
         let Some(h) = headers.get(axum::http::header::AUTHORIZATION) else {
             return Ok(None);
         };
@@ -455,6 +480,7 @@ mod tests {
             base_domain: "localhost".into(),
             bind: "127.0.0.1:0".into(),
             dev: false,
+            auth_mode: crate::config::AuthMode::Oidc,
             oidc_issuer: Some("http://127.0.0.1:1".into()),
             oidc_client_id: Some("test-client".into()),
             oidc_client_secret: None,

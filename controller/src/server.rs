@@ -71,6 +71,10 @@ pub fn router(state: S) -> Router {
         .route("/auth/callback", get(auth_callback))
         .route("/auth/logout", get(auth_logout))
         .fallback(dispatch)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::local_auth::gate,
+        ))
         .with_state(state)
 }
 
@@ -103,6 +107,13 @@ fn require_browser_user(
     }
     if let Some(u) = s.auth.user_from_headers(headers) {
         return Ok(u);
+    }
+    if s.auth.local.is_some() {
+        let target = format!(
+            "/auth/login?return_to={}",
+            crate::auth::urlencoding(return_to)
+        );
+        return Err(axum::response::Redirect::to(&target).into_response());
     }
     if s.auth.oidc_enabled() {
         return Err(login_redirect(&s.auth, auth_host_of(headers), return_to));
@@ -773,6 +784,7 @@ async fn hub_dispatch(s: &AppState, req: Request<Body>, host: &str) -> Response 
                     Ok(apps) => HubIndex {
                         user: &user.name,
                         apps,
+                        port_suffix: local_port_suffix(s),
                     }
                     .render()
                     .map(|h| axum::response::Html(h).into_response())
@@ -799,6 +811,7 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
     let secrets = s.db.secret_names(name).unwrap_or_default();
     HubApp {
         app: &app,
+        port_suffix: local_port_suffix(s),
         revs: &revs,
         active: revs.iter().any(|r| r.active),
         logs,
@@ -915,6 +928,31 @@ async fn call_fn(
         .method(parts.method)
         .uri(parts.uri);
     for (k, v) in &parts.headers {
+        if s.auth.local.is_some() {
+            if k == header::AUTHORIZATION || k.as_str().starts_with("x-user-") {
+                continue;
+            }
+            if k == header::COOKIE {
+                if let Ok(value) = v.to_str() {
+                    let retained = value
+                        .split(';')
+                        .filter(|part| {
+                            !part
+                                .trim()
+                                .split('=')
+                                .next()
+                                .unwrap_or("")
+                                .starts_with("pushit_")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(";");
+                    if !retained.is_empty() {
+                        hreq = hreq.header(k, retained);
+                    }
+                }
+                continue;
+            }
+        }
         hreq = hreq.header(k, v);
     }
     hreq = hreq
@@ -998,11 +1036,23 @@ async fn call_fn(
     }
 }
 
+fn local_port_suffix(s: &AppState) -> String {
+    if s.auth.local.is_some() {
+        if let Ok(bind) = s.cfg.bind.parse::<std::net::SocketAddr>() {
+            if bind.port() != 80 {
+                return format!(":{}", bind.port());
+            }
+        }
+    }
+    String::new()
+}
+
 // ---------- hub templates ----------
 
 #[derive(Template)]
 #[template(path = "hub_index.html")]
 struct HubIndex<'a> {
+    port_suffix: String,
     user: &'a str,
     apps: Vec<crate::db::AppRow>,
 }
@@ -1010,6 +1060,7 @@ struct HubIndex<'a> {
 #[derive(Template)]
 #[template(path = "hub_app.html")]
 struct HubApp<'a> {
+    port_suffix: String,
     app: &'a App,
     revs: &'a [crate::db::Revision],
     active: bool,

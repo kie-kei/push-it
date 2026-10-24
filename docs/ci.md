@@ -33,3 +33,14 @@ Job использует только read-only `contents`, checkout без со
 он **не заменяет** production OIDC/full-stack проверку из
 [security-upgrade.md](security-upgrade.md). Workflow ничего не деплоит,
 не делает merge и не отключает проверку TLS.
+
+### Standalone local authentication
+
+After the workspace and real `examples/hello/fn` WASM build, CI also runs
+`python3 scripts/local-auth-e2e.py`. It uses only temporary synthetic owner data
+and loopback: configuration rejection, stdin setup/login, proxy-isolated CLI,
+real WASM deployment, unauthenticated app-to-hub login/handoff, identity and
+credential forwarding, version changes, restart persistence and durable token
+revocation. `cargo test --workspace --locked` additionally covers local session
+purpose/authority isolation, expiry, replay, CSRF, logout families and attempt
+limits. This is not live OIDC-provider or production deployment verification.

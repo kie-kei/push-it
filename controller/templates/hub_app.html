@@ -7,7 +7,7 @@
 <body><main class="container" data-app="{{ app.name }}">
 <p><a href="/">&larr; apps</a></p>
 <h1>{{ app.name }}</h1>
-<p><a href="//{{ app.domain }}">{{ app.domain }}</a> &middot; created {{ app.created_at }}</p>
+<p><a href="//{{ app.domain }}{{ port_suffix }}">{{ app.domain }}</a> &middot; created {{ app.created_at }}</p>
 
 <h2>Versions</h2>
 <p>{% if active %}<strong>Active</strong>{% else %}<strong>Inactive</strong>: functions and UI are not served.{% endif %}</p>

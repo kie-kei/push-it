@@ -21,6 +21,7 @@ fn state(dev: bool) -> (tempfile::TempDir, Arc<AppState>) {
         base_domain: "localhost".into(),
         bind: "127.0.0.1:0".into(),
         dev,
+        auth_mode: pushit_controller::config::AuthMode::Oidc,
         oidc_issuer: None,
         oidc_client_id: None,
         oidc_client_secret: None,

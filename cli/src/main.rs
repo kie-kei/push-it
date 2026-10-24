@@ -76,8 +76,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<SkillCmd>,
     },
-    /// Authenticate once via browser; the token is stored and reused (~1 year).
-    Login,
+    /// Authenticate via OIDC browser (~1 year) or a local hidden-password prompt (30 days).
+    Login(LoginArgs),
+    /// Manage the standalone local owner and revocable API tokens.
+    Auth {
+        #[command(subcommand)]
+        cmd: AuthCmd,
+    },
     /// Manage connection profiles (per-instance server + token).
     Profile {
         #[command(subcommand)]
@@ -112,6 +117,31 @@ enum Cmd {
     Delete { app: String },
     /// Tail app logs, or stream them with -f.
     Logs(LogsArgs),
+}
+
+#[derive(Args)]
+struct LoginArgs {
+    /// Use standalone owner authentication (never opens a browser or puts tokens in URLs).
+    #[arg(long)]
+    local: bool,
+    /// Read one password line from stdin instead of the hidden terminal prompt.
+    #[arg(long)]
+    password_stdin: bool,
+}
+
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Initialize the singleton owner on the controller computer (cannot replace it).
+    Setup {
+        #[arg(long, env = "PUSHIT_DATA", default_value = "./pushit-data")]
+        data_dir: PathBuf,
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// List unexpired API token IDs and expiry times (never their values).
+    Tokens,
+    /// Revoke an API token by ID, immediately and across controller restarts.
+    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -228,7 +258,7 @@ fn main() -> Result<()> {
         || std::env::var("PUSHIT_DEV")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
-    let client = client_for(dev, token);
+    let client = client_for(&server, dev, token);
     match cli.cmd {
         Cmd::Skill { cmd } => match cmd {
             None => {
@@ -237,10 +267,46 @@ fn main() -> Result<()> {
             }
             Some(SkillCmd::Install(a)) => skill_install(&a),
         },
-        Cmd::Login => {
+        Cmd::Login(args) => {
             let target_profile = cli.profile.clone().or_else(|| store.active.clone());
-            login(&server, target_profile.as_deref())
+            let local = args.local || args.password_stdin || local_mode(&server);
+            if local {
+                local_login(&server, target_profile.as_deref(), args.password_stdin)
+            } else {
+                login(&server, target_profile.as_deref())
+            }
         }
+        Cmd::Auth { cmd } => match cmd {
+            AuthCmd::Setup {
+                data_dir,
+                password_stdin,
+            } => {
+                let password = read_password(password_stdin)?;
+                if !password_stdin {
+                    anyhow::ensure!(
+                        rpassword::prompt_password("Confirm owner password: ")? == password,
+                        "passwords do not match"
+                    );
+                }
+                pushit_controller::local_auth::LocalAuth::setup(&data_dir, &password)?;
+                println!("Owner initialized. Start the controller with PUSHIT_AUTH_MODE=local and this PUSHIT_DATA directory.");
+                Ok(())
+            }
+            AuthCmd::Tokens => show(client.get(url(&server, "/api/tokens")).send()?),
+            AuthCmd::Revoke { id } => {
+                anyhow::ensure!(
+                    id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()),
+                    "invalid token ID"
+                );
+                check(
+                    client
+                        .delete(url(&server, &format!("/api/tokens/{id}")))
+                        .send()?,
+                )?;
+                println!("Token revoked.");
+                Ok(())
+            }
+        },
         Cmd::Profile { cmd } => profile_cmd(cmd),
         Cmd::Plan { manifest } => plan_root(
             &server,
@@ -349,7 +415,7 @@ fn url(server: &str, path: &str) -> String {
     format!("{server}{path}")
 }
 
-fn client_for(dev: bool, token: Option<String>) -> Client {
+fn client_for(server: &str, dev: bool, token: Option<String>) -> Client {
     let mut headers = HeaderMap::new();
     if let Some(t) = token {
         headers.insert(
@@ -363,7 +429,17 @@ fn client_for(dev: bool, token: Option<String>) -> Client {
     if dev {
         headers.insert("X-Pushit-Dev", HeaderValue::from_static("1"));
     }
-    Client::builder().default_headers(headers).build().unwrap()
+    let mut builder = Client::builder().default_headers(headers);
+    if local_server(server).is_ok() {
+        builder = builder
+            .no_proxy()
+            .resolve_to_addrs(
+                "hub.localhost",
+                &["127.0.0.1:0".parse().unwrap(), "[::1]:0".parse().unwrap()],
+            )
+            .redirect(reqwest::redirect::Policy::none());
+    }
+    builder.build().unwrap()
 }
 
 fn saved_token_path() -> Option<PathBuf> {
@@ -1037,6 +1113,90 @@ const SKILL_REFERENCES: &[(&str, &str)] = &[
         include_str!("../../skills/pushit-app/references/logging.md"),
     ),
 ];
+
+fn read_password(from_stdin: bool) -> Result<String> {
+    use std::io::{IsTerminal, Read};
+    let password = if from_stdin {
+        let mut bytes = Vec::new();
+        std::io::stdin().take(1027).read_to_end(&mut bytes)?;
+        if bytes.ends_with(b"\n") {
+            bytes.pop();
+            if bytes.ends_with(b"\r") {
+                bytes.pop();
+            }
+        }
+        String::from_utf8(bytes).context("password must be UTF-8")?
+    } else {
+        anyhow::ensure!(
+            std::io::stdin().is_terminal(),
+            "use --password-stdin for noninteractive input"
+        );
+        rpassword::prompt_password("Owner password: ")?
+    };
+    anyhow::ensure!(
+        !password.trim().is_empty() && password.len() <= 1024 && !password.contains(['\r', '\n']),
+        "password must be one nonempty line of at most 1024 bytes"
+    );
+    Ok(password)
+}
+
+fn local_server(server: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(server)?;
+    anyhow::ensure!(url.scheme() == "http" && url.host_str() == Some("hub.localhost") && url.username().is_empty() && url.password().is_none() && url.path() == "/" && url.query().is_none() && url.fragment().is_none(), "local login requires http://hub.localhost:<controller-port> (no proxy, TLS or remote server)");
+    Ok(url)
+}
+fn local_client() -> Result<Client> {
+    Ok(Client::builder()
+        .no_proxy()
+        .resolve_to_addrs(
+            "hub.localhost",
+            &["127.0.0.1:0".parse()?, "[::1]:0".parse()?],
+        )
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?)
+}
+fn local_mode(server: &str) -> bool {
+    if local_server(server).is_err() {
+        return false;
+    }
+    local_client()
+        .ok()
+        .and_then(|c| c.get(format!("{server}/auth/mode")).send().ok())
+        .filter(|r| r.status().is_success())
+        .and_then(|r| r.json::<serde_json::Value>().ok())
+        .is_some_and(|v| v["mode"] == "local")
+}
+fn local_login(server: &str, target_profile: Option<&str>, stdin: bool) -> Result<()> {
+    local_server(server)?;
+    let password = read_password(stdin)?;
+    let response = local_client()?
+        .post(format!("{server}/auth/local/token"))
+        .header("x-pushit-cli", "1")
+        .json(&serde_json::json!({"password": password}))
+        .send()?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "local login rejected (check password, owner setup and login attempt limit)"
+    );
+    let result: serde_json::Value = response.json()?;
+    let token = result["token"].as_str().context("missing token")?;
+    if let Some(name) = target_profile {
+        let mut store = profiles::load();
+        store.set_token(name, token)?;
+        profiles::save(&store)?;
+        println!("Local owner token saved to profile '{name}' (30 days).");
+    } else {
+        let path = saved_token_path().context("cannot determine config dir (set HOME)")?;
+        profiles::write_private(&path, token.as_bytes())?;
+        println!("Local owner token saved (30 days).");
+    }
+    println!(
+        "Token ID: {} (pushit auth revoke <id> revokes it)",
+        result["id"].as_str().unwrap_or("unknown")
+    );
+    Ok(())
+}
 
 /// `pushit login`: open `{server}/auth/device` in a browser, catch the
 /// minted long-lived token on a localhost listener, store it for client().

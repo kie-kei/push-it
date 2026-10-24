@@ -75,6 +75,9 @@ jobs:
       - name: Production rejection and real WASM rollback smoke
         run: python3 scripts/security-e2e.py
 
+      - name: Standalone local authentication and real WASM platform smoke
+        run: python3 scripts/local-auth-e2e.py
+
       - name: In-flight streaming and timed-out WASM version lifetime
         run: python3 scripts/version-lifetime-e2e.py
 

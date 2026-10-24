@@ -29,6 +29,23 @@ impl Guest for Component {
                     .unwrap_or_else(|| "null".into());
                 (200, format!("{{\"msg\":\"hello\",\"user\":{user}}}"))
             }
+            // Diagnostic booleans only: never echo credential values. The local
+            // authentication smoke uses the real component to verify the trust boundary.
+            "/_fn/auth-check" => {
+                let headers = request.headers();
+                let ids = headers.get("x-user-id");
+                let trusted_identity = ids == vec![b"local-owner".to_vec()];
+                let cookies = headers.get("cookie");
+                let cookie_text = cookies
+                    .iter()
+                    .map(|value| String::from_utf8_lossy(value))
+                    .collect::<Vec<_>>()
+                    .join(";");
+                let platform_credentials =
+                    !headers.get("authorization").is_empty() || cookie_text.contains("pushit_");
+                let app_cookie = cookie_text.contains("app_preference=ok");
+                (200, format!("{{\"trusted_identity\":{trusted_identity},\"platform_credentials\":{platform_credentials},\"app_cookie\":{app_cookie}}}"))
+            }
             "/_fn/env" => {
                 let v = std::env::var("GREETING").unwrap_or_default();
                 (200, format!("{{\"GREETING\":\"{v}\"}}"))

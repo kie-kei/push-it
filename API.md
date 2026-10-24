@@ -3,6 +3,29 @@
 Base: `http://<controller>:9100` (dev default). All JSON unless noted.
 Auth (prod): `Authorization: Bearer <Keycloak access token>` — controller validates the JWT against the realm. Dev mode: `PUSHIT_DEV=1` disables auth checks.
 
+
+## Standalone local authentication (Stage 1)
+
+With explicit `PUSHIT_AUTH_MODE=local`, the unchanged management APIs below are
+available **only** on `http://hub.localhost:<controller-port>`, using revocable
+30-day local bearer tokens or a hub browser session. All cookie-authenticated
+management mutations require both exact hub `Origin` and `X-PushIt-CSRF: 1`;
+missing Origin is rejected in local mode. Unsafe app requests authenticated by
+app cookies require exact app Origin as well. Legacy OIDC/dev behavior is unchanged.
+
+Local-specific endpoints (not enabled for OIDC/dev):
+
+- `GET /auth/mode` on hub → `{"mode":"local"}`.
+- `POST /auth/local/token` on hub → `{"id":"<sha256-id>","token":"<opaque-value>","expires_at":<unix-seconds>,"user":"owner@localhost"}`. Requires JSON `{"password":"..."}`, `Content-Type: application/json`, and `X-PushIt-CLI: 1`. Any supplied Origin must exactly match the hub. The CLI reads the password from a hidden terminal prompt or explicit stdin, not arguments.
+- `POST /api/tokens` on hub → the same token response; requires the owner browser session and Origin/CSRF above. Bearer tokens cannot mint tokens.
+- `GET /api/tokens` on hub → `[{"id":"...","expires_at":<unix-seconds>}]` (no token values).
+- `DELETE /api/tokens/{id}` on hub → 204, durably revoking that token. Listing/revocation accept a valid bearer token or hub session; cookie revocation requires Origin/CSRF.
+- `GET /auth/login` starts browser login. Only hub serves the password form; apps redirect to a challenge-bound, one-use hub handoff. No local `/auth/device` URL-bearer callback exists.
+- `GET /auth/logout` renders confirmation only; `POST /auth/logout` requires exact Origin and a session-bound form CSRF value. Hub logout invalidates linked app sessions and handoffs, not independent API tokens.
+
+Owner initialization is terminal-only (`pushit auth setup`) and cannot overwrite
+an existing owner. See [standalone setup and security boundaries](docs/standalone-local-auth.md).
+
 ## Deploy
 
 `POST /api/apps/{name}/deploy` — `multipart/form-data`:
