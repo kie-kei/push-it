@@ -8,12 +8,17 @@ GitHub Actions запускает один job на pull request, push в `main`
 - `cargo test --workspace --locked`;
 - `cargo build --workspace --locked`;
 - сборка `examples/hello/fn` для `wasm32-wasip2` с `--release --locked`;
+- `cargo install cargo-component --version 0.21.1 --locked` и
+  `bash scripts/scaffold-smoke.sh` — сборка свежего шаблона без WIT registry;
 - `python3 scripts/security-e2e.py` — production-отказы и реальный WASM
-  deploy A → B → rollback A, маршруты, config.js и SQL.
+  deploy A → B → rollback A, маршруты, config.js и SQL;
+- `python3 scripts/portability-smoke.py` — настоящий CLI deploy одинаковых
+  артефактов на два чистых локальных инстанса, отдельные секреты/SQL и
+  HTTP-проверки ([границы проверки](portability.md)).
 
 Версия Rust закреплена на `1.99.1`, оба `Cargo.lock` хранятся в Git.
 Для повторения используйте эту версию с компонентами `rustfmt`, `clippy`
-и target `wasm32-wasip2`, затем команды выше из корня репозитория.
+и targets `wasm32-wasip2`, `wasm32-wasip1`, затем команды выше из корня репозитория.
 Smoke ожидает обычные пути `target/` без переопределения `CARGO_TARGET_DIR`.
 Существующие Clippy warnings видны, но не превращены в ошибки через `-D warnings`.
 
