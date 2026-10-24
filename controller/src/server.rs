@@ -3,8 +3,8 @@ use askama::Template;
 use axum::body::{to_bytes, Body};
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{header, HeaderMap, Request, StatusCode};
-use axum::response::{IntoResponse, Response, Sse};
 use axum::response::sse::Event;
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post, put};
 use axum::Router;
 use http_body_util::Full;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::auth::{Auth, User};
 use crate::config::Config;
-use crate::db::{App, Db};
+use crate::db::{App, Db, Revision};
 use crate::logs::LogStore;
 use crate::manifest::Manifest;
 use crate::runtime::Runtime;
@@ -36,13 +36,13 @@ type S = Arc<AppState>;
 pub fn router(state: S) -> Router {
     Router::new()
         .route("/api/apps", get(api_list_apps))
-        .route("/api/apps/{name}", get(api_app_detail).delete(api_delete_app))
+        .route(
+            "/api/apps/{name}",
+            get(api_app_detail).delete(api_delete_app),
+        )
         .route("/api/apps/{name}/deploy", post(api_deploy))
         .route("/api/apps/{name}/rollback", post(api_rollback))
-        .route(
-            "/api/apps/{name}/secrets",
-            get(api_list_secrets),
-        )
+        .route("/api/apps/{name}/secrets", get(api_list_secrets))
         .route(
             "/api/apps/{name}/secrets/{key}",
             put(api_set_secret).delete(api_delete_secret),
@@ -84,7 +84,7 @@ async fn require_api_user(s: &AppState, headers: &HeaderMap) -> Result<User, Res
 fn require_browser_user(
     s: &AppState,
     headers: &HeaderMap,
-    host: &str,
+    _host: &str,
     return_to: &str,
 ) -> Result<User, Response> {
     if s.auth.dev_bypass(headers) {
@@ -94,18 +94,9 @@ fn require_browser_user(
         return Ok(u);
     }
     if s.auth.oidc_enabled() {
-        let url = s
-            .auth
-            .auth_url(host, return_to)
-            .unwrap_or_else(|_| "/".into());
-        return Err(Response::builder()
-            .status(StatusCode::FOUND)
-            .header(header::LOCATION, url)
-            .body(Body::empty())
-            .unwrap());
+        return Err(login_redirect(&s.auth, auth_host_of(headers), return_to));
     }
-    // no OIDC configured and not dev: treat as dev user (local install)
-    Ok(User::dev())
+    Err((StatusCode::UNAUTHORIZED, "authentication required").into_response())
 }
 
 fn err400(e: anyhow::Error) -> Response {
@@ -118,10 +109,7 @@ fn err500(e: anyhow::Error) -> Response {
 
 // ---------- API ----------
 
-async fn api_list_apps(
-    State(s): State<S>,
-    headers: HeaderMap,
-) -> Result<Response, Response> {
+async fn api_list_apps(State(s): State<S>, headers: HeaderMap) -> Result<Response, Response> {
     require_api_user(&s, &headers).await?;
     match s.db.list_apps() {
         Ok(apps) => Ok(axum::Json(apps).into_response()),
@@ -153,9 +141,11 @@ async fn api_delete_app(
     Path(name): Path<String>,
 ) -> Result<Response, Response> {
     require_api_user(&s, &headers).await?;
-    s.db.delete_app(&name).map_err(err500)?;
-    let dir = s.cfg.apps_dir().join(&name);
-    let _ = std::fs::remove_dir_all(dir);
+    // Delete only directories belonging to the removed DB snapshot. A concurrent
+    // deployment may already have published a new, uniquely named directory.
+    for dir in s.db.delete_app(&name).map_err(err500)? {
+        let _ = std::fs::remove_dir_all(dir);
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -198,6 +188,53 @@ pub fn deploy_inner(
     if manifest.name != name {
         bail!("manifest name '{}' != path name '{name}'", manifest.name);
     }
+    validate_manifest_secrets(s, name, &manifest)?;
+
+    let rev = new_revision_id();
+    let dir = s.cfg.apps_dir().join(name).join(&rev);
+    std::fs::create_dir_all(s.cfg.apps_dir().join(name))?;
+    // Never reuse an artifact directory: even a revision-id collision must fail.
+    std::fs::create_dir(&dir)?;
+    unpack_archive(archive, &dir).inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&dir);
+    })?;
+    if !dir.join("app.wasm").exists() {
+        let _ = std::fs::remove_dir_all(&dir);
+        bail!("archive lacks app.wasm");
+    }
+
+    // validate component links + exports incoming-handler before recording
+    s.runtime.load(&dir).inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&dir);
+    })?;
+
+    let dist = dir.join("dist");
+    if dist.is_dir() {
+        let cfg_js = format!(
+            "window.__ENV__ = {};\n",
+            serde_json::to_string(&manifest.env)?
+        );
+        std::fs::write(dist.join("config.js"), cfg_js)?;
+    }
+
+    let domain = format!("{}.{}", manifest.route_name(), s.cfg.base_domain);
+    s.db.deploy_revision(name, &rev, &dir.to_string_lossy(), &domain, manifest_yaml)
+        .inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&dir);
+        })?;
+
+    if let Err(error) = s
+        .logs
+        .append(name, format!("deployed revision {rev}\n").as_bytes())
+    {
+        tracing::warn!(%error, "revision committed but deployment log could not be written");
+    }
+    Ok(serde_json::json!({
+        "app": name, "revision": rev, "domain": domain,
+    }))
+}
+
+fn validate_manifest_secrets(s: &AppState, name: &str, manifest: &Manifest) -> Result<()> {
     // secrets validation: all declared names must exist
     let existing = s.db.secret_names(name)?;
     let missing: Vec<&String> = manifest
@@ -206,7 +243,14 @@ pub fn deploy_inner(
         .filter(|k| !existing.contains(k))
         .collect();
     if !missing.is_empty() {
-        bail!("missing secrets: {}", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+        bail!(
+            "missing secrets: {}",
+            missing
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 
     // sql bindings: sources must exist now, not just at request time
@@ -236,38 +280,7 @@ pub fn deploy_inner(
         }
     }
 
-    let rev = new_revision_id();
-    let dir = s.cfg.apps_dir().join(name).join(&rev);
-    std::fs::create_dir_all(&dir)?;
-    unpack_archive(archive, &dir)?;
-    if !dir.join("app.wasm").exists() {
-        let _ = std::fs::remove_dir_all(&dir);
-        bail!("archive lacks app.wasm");
-    }
-
-    // validate component links + exports incoming-handler before recording
-    s.runtime.load(&dir).inspect_err(|_| {
-        let _ = std::fs::remove_dir_all(&dir);
-    })?;
-
-    let dist = dir.join("dist");
-    if dist.is_dir() {
-        let cfg_js = format!(
-            "window.__ENV__ = {};\n",
-            serde_json::to_string(&manifest.env)?
-        );
-        std::fs::write(dist.join("config.js"), cfg_js)?;
-    }
-
-    let domain = format!("{}.{}", manifest.route_name(), s.cfg.base_domain);
-    s.db.upsert_app(name, &domain, manifest_yaml)?;
-    s.db.add_revision(name, &rev, &dir.to_string_lossy(), true)?;
-    s.db.activate(name, &rev)?;
-
-    s.logs.append(name, format!("deployed revision {rev}\n").as_bytes())?;
-    Ok(serde_json::json!({
-        "app": name, "revision": rev, "domain": domain,
-    }))
+    Ok(())
 }
 
 fn new_revision_id() -> String {
@@ -284,11 +297,17 @@ fn unpack_archive(bytes: &[u8], dest: &std::path::Path) -> Result<()> {
     for e in ar.entries()? {
         let mut e = e?;
         let p = e.path()?.to_path_buf();
-        // reject path escapes
-        if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            continue;
+        // Revision contents must not point outside their immutable directory.
+        if p.is_absolute()
+            || p.components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            || !(e.header().entry_type().is_file() || e.header().entry_type().is_dir())
+        {
+            bail!("archive contains an unsafe path or non-regular entry");
         }
-        e.unpack_in(dest)?;
+        if !e.unpack_in(dest)? {
+            bail!("archive entry escapes revision directory");
+        }
     }
     Ok(())
 }
@@ -330,10 +349,7 @@ async fn api_delete_secret(
 // platform-wide (global) secrets
 
 /// Mint a long-lived CLI token for the authenticated user.
-async fn api_create_token(
-    State(s): State<S>,
-    headers: HeaderMap,
-) -> Result<Response, Response> {
+async fn api_create_token(State(s): State<S>, headers: HeaderMap) -> Result<Response, Response> {
     let user = require_api_user(&s, &headers).await?;
     Ok(axum::Json(serde_json::json!({
         "token": s.auth.sign_api_token(&user),
@@ -351,16 +367,12 @@ async fn auth_device(
     headers: HeaderMap,
     Query(q): Query<DeviceQuery>,
 ) -> Response {
-    let host = host_of(&headers);
-    let user = match require_browser_user(
-        &s,
-        &headers,
-        &host,
-        &format!("/auth/device?port={}", q.port),
-    ) {
-        Ok(u) => u,
-        Err(r) => return r,
-    };
+    let host = auth_host_of(&headers);
+    let user =
+        match require_browser_user(&s, &headers, host, &format!("/auth/device?port={}", q.port)) {
+            Ok(u) => u,
+            Err(r) => return r,
+        };
     let token = s.auth.sign_api_token(&user);
     let url = format!(
         "http://127.0.0.1:{}/?token={token}&user={}",
@@ -435,16 +447,41 @@ async fn api_rollback(
     };
     let rev = match target {
         Some(r) => r,
-        None => s
-            .db
-            .previous_revision(&name)
-            .map_err(err500)?
-            .ok_or_else(|| (StatusCode::BAD_REQUEST, "no previous revision").into_response())?,
+        None => {
+            s.db.previous_revision(&name)
+                .map_err(err500)?
+                .ok_or_else(|| (StatusCode::BAD_REQUEST, "no previous revision").into_response())?
+        }
     };
+    let snapshot =
+        s.db.revision(&name, &rev)
+            .map_err(err500)?
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "no such revision").into_response())?;
+    let manifest = snapshot.manifest.as_deref().ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            "legacy revision has no manifest; redeploy it before rollback",
+        )
+            .into_response()
+    })?;
+    let manifest = Manifest::parse(manifest).map_err(err400)?;
+    validate_manifest_secrets(&s, &name, &manifest).map_err(err400)?;
+    if !std::path::Path::new(&snapshot.artifact_dir)
+        .join("app.wasm")
+        .is_file()
+    {
+        return Err((StatusCode::BAD_REQUEST, "revision artifact is missing").into_response());
+    }
+    s.runtime
+        .load(std::path::Path::new(&snapshot.artifact_dir))
+        .map_err(err400)?;
     s.db.activate(&name, &rev).map_err(err400)?;
-    s.logs
+    if let Err(error) = s
+        .logs
         .append(&name, format!("rolled back to {rev}\n").as_bytes())
-        .map_err(err500)?;
+    {
+        tracing::warn!(%error, "rollback committed but deployment log could not be written");
+    }
     Ok(axum::Json(serde_json::json!({"app": name, "revision": rev})).into_response())
 }
 
@@ -492,13 +529,9 @@ struct LoginQ {
     return_to: Option<String>,
 }
 
-async fn auth_login(
-    State(s): State<S>,
-    headers: HeaderMap,
-    Query(q): Query<LoginQ>,
-) -> Response {
-    let host = host_of(&headers);
-    if s.auth.dev_bypass(&headers) || !s.auth.oidc_enabled() {
+async fn auth_login(State(s): State<S>, headers: HeaderMap, Query(q): Query<LoginQ>) -> Response {
+    let host = auth_host_of(&headers);
+    if s.auth.dev_bypass(&headers) {
         let cookie = s.auth.cookie_header(&User::dev());
         let dest = q.return_to.unwrap_or_else(|| "/".into());
         return Response::builder()
@@ -508,10 +541,18 @@ async fn auth_login(
             .body(Body::empty())
             .unwrap();
     }
-    match s.auth.auth_url(&host, &q.return_to.unwrap_or_else(|| "/".into())) {
-        Ok(url) => Response::builder()
+    if !s.auth.oidc_enabled() {
+        return (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+    }
+    login_redirect(&s.auth, host, &q.return_to.unwrap_or_else(|| "/".into()))
+}
+
+fn login_redirect(auth: &Auth, host: &str, return_to: &str) -> Response {
+    match auth.auth_url(host, return_to) {
+        Ok((url, cookie)) => Response::builder()
             .status(StatusCode::FOUND)
             .header(header::LOCATION, url)
+            .header(header::SET_COOKIE, cookie)
             .body(Body::empty())
             .unwrap(),
         Err(e) => err500(e),
@@ -525,16 +566,17 @@ struct CbQ {
 }
 
 async fn auth_callback(State(s): State<S>, headers: HeaderMap, Query(q): Query<CbQ>) -> Response {
-    let host = host_of(&headers);
+    let host = auth_host_of(&headers);
     match (q.code, q.state) {
-        (Some(code), Some(st)) => match s.auth.exchange_code(&host, &code, &st).await {
+        (Some(code), Some(st)) => match s.auth.exchange_code(host, &code, &st, &headers).await {
             Ok((user, return_to)) => Response::builder()
                 .status(StatusCode::FOUND)
                 .header(header::SET_COOKIE, s.auth.cookie_header(&user))
+                .header(header::SET_COOKIE, s.auth.clear_login_cookie())
                 .header(header::LOCATION, return_to)
                 .body(Body::empty())
                 .unwrap(),
-            Err(e) => err500(e),
+            Err(_) => (StatusCode::BAD_REQUEST, "invalid login callback").into_response(),
         },
         _ => (StatusCode::BAD_REQUEST, "missing code/state").into_response(),
     }
@@ -554,6 +596,13 @@ async fn auth_logout(State(s): State<S>) -> Response {
 }
 
 // ---------- host dispatch ----------
+
+fn auth_host_of(headers: &HeaderMap) -> &str {
+    headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+}
 
 fn host_of(headers: &HeaderMap) -> String {
     headers
@@ -626,8 +675,8 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
     .unwrap_or_else(|e| err500(e.into()))
 }
 
-async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, prefix: &str) -> Response {
-    let Some(app) = s.db.app_by_domain(prefix).ok().flatten() else {
+async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, _prefix: &str) -> Response {
+    let Some((app, rev)) = s.db.active_app_by_domain(host).ok().flatten() else {
         return (StatusCode::NOT_FOUND, "no app for this host").into_response();
     };
     let uri = req.uri().clone();
@@ -636,15 +685,12 @@ async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, prefix: &str
         Err(r) => return r,
     };
     if uri.path().starts_with("/_fn/") || uri.path() == "/_fn" {
-        return call_fn(&s, &app, user, req).await;
+        return call_fn(s, &app, &rev, user, req).await;
     }
-    serve_static(&s, &app, &uri)
+    serve_static(&rev, &uri)
 }
 
-fn serve_static(s: &AppState, app: &App, uri: &http::Uri) -> Response {
-    let Some(rev) = s.db.active_revision(&app.name).ok().flatten() else {
-        return (StatusCode::NOT_FOUND, "no active revision").into_response();
-    };
+fn serve_static(rev: &Revision, uri: &http::Uri) -> Response {
     let dist = PathBuf::from(&rev.artifact_dir).join("dist");
     let mut rel = uri.path().trim_start_matches('/').to_string();
     if rel.is_empty() {
@@ -684,10 +730,13 @@ fn serve_static(s: &AppState, app: &App, uri: &http::Uri) -> Response {
         .unwrap()
 }
 
-async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Response {
-    let Some(rev) = s.db.active_revision(&app.name).ok().flatten() else {
-        return (StatusCode::NOT_FOUND, "no active revision").into_response();
-    };
+async fn call_fn(
+    s: &AppState,
+    app: &App,
+    rev: &Revision,
+    user: User,
+    req: Request<Body>,
+) -> Response {
     let Ok(manifest) = Manifest::parse(&app.manifest) else {
         return err500(anyhow::anyhow!("stored manifest fails to parse"));
     };
@@ -735,7 +784,8 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
                 "platform" => s.db.get_global_secret(key),
                 _ => return None,
             };
-            enc.ok().flatten()
+            enc.ok()
+                .flatten()
                 .and_then(|enc| s.secrets.decrypt(&enc).ok())
                 .map(|v| String::from_utf8_lossy(&v).into_owned())
         }) {
@@ -761,7 +811,14 @@ async fn call_fn(s: &AppState, app: &App, user: User, req: Request<Body>) -> Res
     };
     match s
         .runtime
-        .call(std::path::Path::new(&rev.artifact_dir), &app.name, &s.cfg.data_dir, env, caps, hreq)
+        .call(
+            std::path::Path::new(&rev.artifact_dir),
+            &app.name,
+            &s.cfg.data_dir,
+            env,
+            caps,
+            hreq,
+        )
         .await
     {
         Ok(res) => {
