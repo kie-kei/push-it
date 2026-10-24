@@ -12,7 +12,7 @@
 {% for a in apps %}
 <tr>
   <td><a href="/apps/{{ a.name }}">{{ a.name }}</a></td>
-  <td><a href="//{{ a.domain }}">{{ a.domain }}</a></td>
+  <td><a href="//{{ a.domain }}{{ port_suffix }}">{{ a.domain }}</a></td>
   <td>{{ a.revision }}</td><td>{{ a.status }}</td>
   <td>{{ a.deployed_at }}</td>
 </tr>

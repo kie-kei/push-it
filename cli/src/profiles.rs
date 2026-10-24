@@ -46,14 +46,7 @@ pub fn load() -> Store {
 
 pub fn save(store: &Store) -> Result<()> {
     let p = path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir (set HOME)"))?;
-    std::fs::create_dir_all(p.parent().unwrap())?;
-    std::fs::write(&p, toml::to_string_pretty(store)?)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    write_private(&p, toml::to_string_pretty(store)?.as_bytes())
 }
 
 impl Store {
@@ -71,4 +64,43 @@ impl Store {
         e.token = token.to_string();
         Ok(())
     }
+}
+
+/// Publish credentials atomically, with private permissions from creation.
+pub fn write_private(path: &std::path::Path, contents: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let parent = path.parent().context("missing credential directory")?;
+    let mut dirs = std::fs::DirBuilder::new();
+    dirs.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        dirs.mode(0o700);
+    }
+    dirs.create(parent)?;
+    let temp = parent.join(format!(
+        ".pushit-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| -> Result<()> {
+        let mut file = options.open(&temp)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }

@@ -36,6 +36,9 @@ http = "1"
 hyper = "1"
 http-body-util = "0.1"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "any", "postgres", "mysql", "sqlite", "chrono"] }
+argon2 = "0.5"
+serde_urlencoded = "0.7"
+rand = "0.8"
 chrono = { version = "0.4", default-features = false }
 
 [dev-dependencies]

@@ -1,11 +1,19 @@
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AuthMode {
+    Local,
+    Oidc,
+    Dev,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub data_dir: PathBuf,
     pub base_domain: String,
     pub bind: String,
     pub dev: bool,
+    pub auth_mode: AuthMode,
     pub oidc_issuer: Option<String>,
     pub oidc_client_id: Option<String>,
     pub oidc_client_secret: Option<String>,
@@ -24,15 +32,64 @@ impl Config {
         let data_dir =
             PathBuf::from(std::env::var("PUSHIT_DATA").unwrap_or_else(|_| "./pushit-data".into()));
         let dev = std::env::var("PUSHIT_DEV").ok().as_deref() == Some("1");
-        let session_key = session_key(dev, nonempty_env("PUSHIT_SESSION_KEY"))?;
+        let explicit = nonempty_env("PUSHIT_AUTH_MODE");
+        let auth_mode = match explicit.as_deref() {
+            Some("local") => AuthMode::Local,
+            Some("oidc") => AuthMode::Oidc,
+            Some("dev") => AuthMode::Dev,
+            None if dev => AuthMode::Dev,
+            None => AuthMode::Oidc,
+            _ => anyhow::bail!("PUSHIT_AUTH_MODE must be local, oidc or dev"),
+        };
+        anyhow::ensure!(
+            !dev || auth_mode == AuthMode::Dev,
+            "PUSHIT_DEV conflicts with PUSHIT_AUTH_MODE"
+        );
+        let oidc_issuer = nonempty_env("PUSHIT_OIDC_ISSUER");
+        let oidc_client_id = nonempty_env("PUSHIT_OIDC_CLIENT_ID");
+        let oidc_client_secret = nonempty_env("PUSHIT_OIDC_CLIENT_SECRET");
+        anyhow::ensure!(
+            auth_mode != AuthMode::Local
+                || (oidc_issuer.is_none()
+                    && oidc_client_id.is_none()
+                    && oidc_client_secret.is_none()),
+            "local auth cannot be combined with OIDC settings"
+        );
+        let session_key = if auth_mode == AuthMode::Local {
+            Vec::new()
+        } else {
+            session_key(
+                auth_mode == AuthMode::Dev,
+                nonempty_env("PUSHIT_SESSION_KEY"),
+            )?
+        };
+        let base_domain =
+            std::env::var("PUSHIT_BASE_DOMAIN").unwrap_or_else(|_| "localhost".into());
+        let bind = std::env::var("PUSHIT_BIND").unwrap_or_else(|_| {
+            if auth_mode == AuthMode::Local {
+                "127.0.0.1:9100".into()
+            } else {
+                "0.0.0.0:9100".into()
+            }
+        });
+        if auth_mode == AuthMode::Local {
+            validate_local(&base_domain, &bind)?;
+        }
+        if explicit.as_deref() == Some("oidc") {
+            anyhow::ensure!(
+                oidc_issuer.is_some() && oidc_client_id.is_some(),
+                "OIDC mode requires issuer and client ID"
+            );
+        }
         Ok(Config {
             data_dir,
-            base_domain: std::env::var("PUSHIT_BASE_DOMAIN").unwrap_or_else(|_| "localhost".into()),
-            bind: std::env::var("PUSHIT_BIND").unwrap_or_else(|_| "0.0.0.0:9100".into()),
-            dev,
-            oidc_issuer: nonempty_env("PUSHIT_OIDC_ISSUER"),
-            oidc_client_id: nonempty_env("PUSHIT_OIDC_CLIENT_ID"),
-            oidc_client_secret: nonempty_env("PUSHIT_OIDC_CLIENT_SECRET"),
+            base_domain,
+            bind,
+            dev: auth_mode == AuthMode::Dev,
+            auth_mode,
+            oidc_issuer,
+            oidc_client_id,
+            oidc_client_secret,
             session_key,
             handler_timeout_secs: 30,
         })
@@ -69,6 +126,27 @@ fn session_key(dev: bool, configured: Option<String>) -> anyhow::Result<Vec<u8>>
     anyhow::ensure!(key != DEV_SESSION_KEY && key.trim().len() >= 32,
         "PUSHIT_SESSION_KEY must be a randomly generated persistent secret of at least 32 bytes (not the dev default)");
     Ok(key.into_bytes())
+}
+
+/// Stage 1 deliberately excludes proxies, public binds, custom domains and TLS.
+pub fn validate_local(base_domain: &str, bind: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        base_domain == "localhost",
+        "local auth requires PUSHIT_BASE_DOMAIN=localhost"
+    );
+    let address: std::net::SocketAddr = bind
+        .parse()
+        .map_err(|_| anyhow::anyhow!("local auth requires a numeric loopback PUSHIT_BIND"))?;
+    anyhow::ensure!(
+        address.port() != 0,
+        "local auth requires a nonzero controller port"
+    );
+    anyhow::ensure!(
+        address.ip() == std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+            || address.ip() == std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+        "local auth requires PUSHIT_BIND on 127.0.0.1 or ::1"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

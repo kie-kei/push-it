@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let secrets = Secrets::load(&cfg.age_key_path())?;
     let runtime = Runtime::new(Duration::from_secs(cfg.handler_timeout_secs))?;
     let logs = Arc::new(LogStore::new(cfg.logs_dir())?);
-    let auth = Auth::new(cfg.clone());
+    let auth = Auth::try_new(cfg.clone())?;
 
     let state = Arc::new(AppState {
         cfg: cfg.clone(),

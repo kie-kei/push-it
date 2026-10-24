@@ -4,6 +4,10 @@
 
 [Видение](VISION.md) · [Приоритеты и критерии готовности](ROADMAP.md) · [Архитектура](ARCHITECTURE.md) · [API](API.md).
 
+## Standalone local platform
+
+Want the full controller, hub, app subdomains, versions and secrets without Keycloak/Caddy? Use explicit **local owner auth** on loopback. It is separate from `pushit dev` and does not disable authentication. See [setup, CLI login and security boundaries](docs/standalone-local-auth.md).
+
 ## Установка CLI
 
 ```bash
