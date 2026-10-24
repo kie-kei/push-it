@@ -1,8 +1,8 @@
+use age::secrecy::ExposeSecret;
 use age::x25519;
 use anyhow::Result;
 use std::io::{Read, Write};
 use std::path::Path;
-use age::secrecy::ExposeSecret;
 use std::str::FromStr;
 
 /// age-encrypted secret store. Key from PUSHIT_AGE_KEY (X25519 identity
@@ -31,10 +31,7 @@ impl Secrets {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(
-                            key_path,
-                            std::fs::Permissions::from_mode(0o600),
-                        )?;
+                        std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))?;
                     }
                     id
                 }
@@ -61,9 +58,7 @@ impl Secrets {
     pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>> {
         let dec = age::Decryptor::new_buffered(ciphertext)?;
         let mut out = vec![];
-        let mut r = dec.decrypt(std::iter::once(
-            &self.identity as &dyn age::Identity,
-        ))?;
+        let mut r = dec.decrypt(std::iter::once(&self.identity as &dyn age::Identity))?;
         r.read_to_end(&mut out)?;
         Ok(out)
     }

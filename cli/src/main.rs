@@ -236,19 +236,23 @@ fn main() -> Result<()> {
         Cmd::Deploy(a) => deploy(&server, &client, a),
         Cmd::Secret(s) => secret(&server, &client, s),
         Cmd::List => show(client.get(url(&server, "/api/apps")).send()?),
-        Cmd::Status { app } => {
-            show(client.get(url(&server, &format!("/api/apps/{app}"))).send()?)
-        }
+        Cmd::Status { app } => show(
+            client
+                .get(url(&server, &format!("/api/apps/{app}")))
+                .send()?,
+        ),
         Cmd::Rollback { app, revision } => {
             let body = match revision {
                 Some(r) => format!("{{\"revision\":\"{r}\"}}"),
                 None => "{}".into(),
             };
-            show(client
-                .post(url(&server, &format!("/api/apps/{app}/rollback")))
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(body)
-                .send()?)
+            show(
+                client
+                    .post(url(&server, &format!("/api/apps/{app}/rollback")))
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(body)
+                    .send()?,
+            )
         }
         Cmd::Delete { app } => delete(&server, &client, &app),
         Cmd::Logs(a) => logs(&server, &client, a),
@@ -359,16 +363,20 @@ fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
         if d.is_dir() {
             println!("ok dist: {}", d.display());
         } else {
-            println!("warn: ui_dist {} not found — app will deploy without UI", d.display());
+            println!(
+                "warn: ui_dist {} not found — app will deploy without UI",
+                d.display()
+            );
         }
     }
     Ok(())
 }
 
 fn deploy(server: &str, client: &Client, args: DeployArgs) -> Result<()> {
-    let manifest_text =
-        fs::read_to_string(&args.manifest).with_context(|| format!("read {}", args.manifest.display()))?;
-    let manifest: serde_yaml::Value = serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
+    let manifest_text = fs::read_to_string(&args.manifest)
+        .with_context(|| format!("read {}", args.manifest.display()))?;
+    let manifest: serde_yaml::Value =
+        serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
 
     // Root manifest: `apps:` maps name → {repo, ref?, manifest?}.
     // Each app is cloned/pulled next to the root manifest and built+deployed
@@ -380,18 +388,27 @@ fn deploy(server: &str, client: &Client, args: DeployArgs) -> Result<()> {
     deploy_one(server, client, args, manifest_text, &manifest)
 }
 
-fn deploy_root(server: &str, client: &Client, args: &DeployArgs, manifest: &serde_yaml::Value) -> Result<()> {
+fn deploy_root(
+    server: &str,
+    client: &Client,
+    args: &DeployArgs,
+    manifest: &serde_yaml::Value,
+) -> Result<()> {
     let apps = manifest
         .get("apps")
         .and_then(|v| v.as_mapping())
-        .ok_or_else(|| anyhow!("root manifest: `apps:` must be a mapping of name → {{repo, ...}}"))?;
+        .ok_or_else(|| {
+            anyhow!("root manifest: `apps:` must be a mapping of name → {{repo, ...}}")
+        })?;
     let base = manifest_base(&args.manifest);
     let cache = base.join(".pushit-cache");
     fs::create_dir_all(&cache)?;
 
     let mut failed = Vec::new();
     for (key, cfg) in apps {
-        let key = key.as_str().ok_or_else(|| anyhow!("apps: keys must be strings"))?;
+        let key = key
+            .as_str()
+            .ok_or_else(|| anyhow!("apps: keys must be strings"))?;
         let repo = cfg
             .get("repo")
             .and_then(|v| v.as_str())
@@ -492,12 +509,23 @@ fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
     };
     if dir.join(".git").exists() {
         let mut fetch = std::process::Command::new("git");
-        fetch.arg("-C").arg(dir).arg("fetch").arg("--depth").arg("1").arg("origin");
+        fetch
+            .arg("-C")
+            .arg(dir)
+            .arg("fetch")
+            .arg("--depth")
+            .arg("1")
+            .arg("origin");
         // specific ref, else remote HEAD
         fetch.arg(git_ref.unwrap_or("HEAD"));
         run(fetch)?;
         let mut reset = std::process::Command::new("git");
-        reset.arg("-C").arg(dir).arg("reset").arg("--hard").arg("FETCH_HEAD");
+        reset
+            .arg("-C")
+            .arg(dir)
+            .arg("reset")
+            .arg("--hard")
+            .arg("FETCH_HEAD");
         run(reset)?;
         Ok(())
     } else {
@@ -514,9 +542,10 @@ fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
 /// `pushit plan`: diff root manifest (+ synced repos) against live state.
 /// Read-only: create / env-drift / missing-secrets / orphan detection.
 fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
-    let manifest_text =
-        fs::read_to_string(&args.manifest).with_context(|| format!("read {}", args.manifest.display()))?;
-    let manifest: serde_yaml::Value = serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
+    let manifest_text = fs::read_to_string(&args.manifest)
+        .with_context(|| format!("read {}", args.manifest.display()))?;
+    let manifest: serde_yaml::Value =
+        serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
     let apps = manifest
         .get("apps")
         .and_then(|v| v.as_mapping())
@@ -546,7 +575,9 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
     let mut drift = 0usize;
     let mut expected: Vec<String> = Vec::new();
     for (key, cfg) in apps {
-        let key = key.as_str().ok_or_else(|| anyhow!("apps: keys must be strings"))?;
+        let key = key
+            .as_str()
+            .ok_or_else(|| anyhow!("apps: keys must be strings"))?;
         let repo = cfg
             .get("repo")
             .and_then(|v| v.as_str())
@@ -603,15 +634,23 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             .send()?
             .error_for_status()?
             .json()?;
-        let live_manifest: serde_yaml::Value =
-            serde_yaml::from_str(detail.get("manifest").and_then(|v| v.as_str()).unwrap_or(""))?;
+        let live_manifest: serde_yaml::Value = serde_yaml::from_str(
+            detail
+                .get("manifest")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+        )?;
 
         // env diff (root env is authoritative)
         let mut changes: Vec<String> = Vec::new();
         if let Some(live_env) = live_manifest.get("env").and_then(|v| v.as_mapping()) {
             for (k, v) in env.as_mapping().unwrap() {
                 if live_env.get(k) != Some(v) {
-                    changes.push(format!("env.{} = {:?}", k.as_str().unwrap_or("?"), v.as_str().unwrap_or("?")));
+                    changes.push(format!(
+                        "env.{} = {:?}",
+                        k.as_str().unwrap_or("?"),
+                        v.as_str().unwrap_or("?")
+                    ));
                 }
             }
             for k in live_env.keys() {
@@ -643,7 +682,9 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             .unwrap_or_default();
         for s in &wanted {
             if !have.iter().any(|h| h == s) {
-                changes.push(format!("secret {s} missing (pushit secret set {app_name} {s}=…)"));
+                changes.push(format!(
+                    "secret {s} missing (pushit secret set {app_name} {s}=…)"
+                ));
             }
         }
 
@@ -701,7 +742,10 @@ fn deploy_one(
         .ok_or_else(|| anyhow!("pushit.yaml: missing `name`"))?;
     let base = manifest_base(&args.manifest);
 
-    let wasm = match args.wasm.or_else(|| manifest_path(&manifest, "entry", base)) {
+    let wasm = match args
+        .wasm
+        .or_else(|| manifest_path(&manifest, "entry", base))
+    {
         Some(p) => p,
         None => find_wasm(base)?,
     };
@@ -715,7 +759,10 @@ fn deploy_one(
 
     let archive = build_archive(&wasm, dist.as_deref())?;
     let form = multipart::Form::new()
-        .part("manifest", multipart::Part::text(manifest_text).file_name("pushit.yaml"))
+        .part(
+            "manifest",
+            multipart::Part::text(manifest_text).file_name("pushit.yaml"),
+        )
         .part(
             "archive",
             multipart::Part::bytes(archive)
@@ -800,7 +847,9 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
             println!("set {key} for {app}");
         }
         SecretCmd::Ls { app } => {
-            let resp = client.get(url(server, &format!("/api/apps/{app}/secrets"))).send()?;
+            let resp = client
+                .get(url(server, &format!("/api/apps/{app}/secrets")))
+                .send()?;
             println!("{}", check(resp)?.text()?);
         }
         SecretCmd::Rm { app, key } => {
@@ -828,7 +877,9 @@ fn secret(server: &str, client: &Client, cmd: SecretCmd) -> Result<()> {
                 println!("{}", check(resp)?.text()?);
             }
             GlobalCmd::Rm { key } => {
-                let resp = client.delete(url(server, &format!("{GLOBAL}/{key}"))).send()?;
+                let resp = client
+                    .delete(url(server, &format!("{GLOBAL}/{key}")))
+                    .send()?;
                 check(resp)?;
                 println!("removed global secret {key}");
             }
@@ -850,9 +901,7 @@ fn login(server: &str, target_profile: Option<&str>) -> Result<()> {
     let port = listener.local_addr()?.port();
     let url = format!("{server}/auth/device?port={port}");
     println!("opening {url}\n(if the browser does not open, visit it manually)");
-    let _ = std::process::Command::new("xdg-open")
-        .arg(&url)
-        .spawn();
+    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
 
     println!("waiting for authorization (2 min)... ");
     listener.set_nonblocking(false)?;
@@ -900,8 +949,8 @@ fn login(server: &str, target_profile: Option<&str>) -> Result<()> {
           <html><body><h3>Token received.</h3>You can close this tab and return to the terminal.</body></html>",
     );
 
-    let path = saved_token_path()
-        .ok_or_else(|| anyhow!("cannot determine config dir (set HOME)"))?;
+    let path =
+        saved_token_path().ok_or_else(|| anyhow!("cannot determine config dir (set HOME)"))?;
     println!("logged in as {user}");
     match target_profile {
         Some(name) => {
@@ -934,15 +983,30 @@ fn profile_cmd(cmd: ProfileCmd) -> Result<()> {
                 return Ok(());
             }
             for (name, e) in &store.profiles {
-                let active = if store.active.as_deref() == Some(name) { "*" } else { " " };
-                println!("{active} {name:<16} {}  token:{}", e.server, if e.token.is_empty() { "not set" } else { "set" });
+                let active = if store.active.as_deref() == Some(name) {
+                    "*"
+                } else {
+                    " "
+                };
+                println!(
+                    "{active} {name:<16} {}  token:{}",
+                    e.server,
+                    if e.token.is_empty() { "not set" } else { "set" }
+                );
             }
         }
         ProfileCmd::Show { name } => {
             let e = store.get(&name)?;
             println!("name:   {name}");
             println!("server: {}", e.server);
-            println!("token:  {}", if e.token.is_empty() { "not set (pushit login --profile {name})" } else { "set" });
+            println!(
+                "token:  {}",
+                if e.token.is_empty() {
+                    "not set (pushit login --profile {name})"
+                } else {
+                    "set"
+                }
+            );
             println!("active: {}", store.active.as_deref() == Some(name.as_str()));
         }
         ProfileCmd::Use { name } => {
@@ -967,7 +1031,10 @@ fn profile_cmd(cmd: ProfileCmd) -> Result<()> {
                 store.active = Some(name.clone());
             }
             profiles::save(&store)?;
-            println!("profile '{name}' added{}", if first { " and activated" } else { "" });
+            println!(
+                "profile '{name}' added{}",
+                if first { " and activated" } else { "" }
+            );
             if first {
                 println!("next: pushit login --profile {name}");
             }
@@ -1004,7 +1071,11 @@ fn skill_install(a: &SkillInstallArgs) -> Result<()> {
     print!(
         "install pushit skill to {}?{} [y/N] ",
         target.parent().unwrap().display(),
-        if target.exists() { " (will overwrite)" } else { "" }
+        if target.exists() {
+            " (will overwrite)"
+        } else {
+            ""
+        }
     );
     std::io::Write::flush(&mut std::io::stderr())?;
     let mut line = String::new();
@@ -1018,7 +1089,8 @@ fn skill_install(a: &SkillInstallArgs) -> Result<()> {
     }
     fs::write(&target, SKILL_MD)?;
     // references/ travels with the skill (relative links in SKILL.md)
-    let refs_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/pushit-app/references");
+    let refs_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/pushit-app/references");
     if refs_dir.is_dir() {
         let dest = target.parent().unwrap().join("references");
         fs::create_dir_all(&dest)?;
@@ -1042,7 +1114,9 @@ fn delete(server: &str, client: &Client, app: &str) -> Result<()> {
         println!("aborted");
         return Ok(());
     }
-    let resp = client.delete(url(server, &format!("/api/apps/{app}"))).send()?;
+    let resp = client
+        .delete(url(server, &format!("/api/apps/{app}")))
+        .send()?;
     check(resp)?;
     println!("deleted {app}");
     Ok(())
@@ -1065,7 +1139,10 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
         }
     } else {
         let resp = client
-            .get(url(server, &format!("/api/apps/{}/logs?tail={}", args.app, args.tail)))
+            .get(url(
+                server,
+                &format!("/api/apps/{}/logs?tail={}", args.app, args.tail),
+            ))
             .send()?;
         let body = check(resp)?.text()?;
         print!("{body}");
@@ -1177,9 +1254,16 @@ fn init(args: InitArgs) -> Result<()> {
 
     write_new(
         "pushit.yaml",
-        INIT_MANIFEST.replace("{name}", &name).replace("{crate_name}", &crate_name),
+        INIT_MANIFEST
+            .replace("{name}", &name)
+            .replace("{crate_name}", &crate_name),
     )?;
-    write_new("fn/Cargo.toml", INIT_FN_TOML.replace("{crate_name}", &crate_name).replace("{name}", &name))?;
+    write_new(
+        "fn/Cargo.toml",
+        INIT_FN_TOML
+            .replace("{crate_name}", &crate_name)
+            .replace("{name}", &name),
+    )?;
     write_new("fn/wit/world.wit", INIT_WIT.replace("{name}", &name))?;
     write_new("fn/src/lib.rs", INIT_LIB_RS.to_string())?;
     write_new("ui/index.html", INIT_INDEX_HTML.replace("{name}", &name))?;
