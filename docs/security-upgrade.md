@@ -174,6 +174,78 @@ Caddy по пути `/data/caddy/pki/authorities/local/root.crt`; импорти
 issuer с доверенным сертификатом и согласованными доменами/Caddyfile. Пока discovery
 из controller не проходит проверку сертификата, полный стек **не подтверждён**.
 
+#### Production: публичный домен и публично доверенный сертификат
+
+Штатный `infra/Caddyfile` — **локальный пример**, а не готовая production-
+конфигурация: домены в нём и `infra/realm-pushit.json` заданы явно. Одной смены
+`PUSHIT_BASE_DOMAIN` в `.env` недостаточно. Для обычного публичного домена,
+например `apps.example.com`, подготовьте отдельную конфигурацию перед запуском:
+
+1. Направьте DNS всех используемых имён на Caddy. Из интернета должны быть
+   доступны 80/443 для ACME; issuer должен разрешаться и быть доступен из
+   контейнера controller. Публикуйте controller только через reverse proxy:
+   удалите внешний port mapping `9100:9100` или ограничьте его loopback
+   (`127.0.0.1:9100:9100`) в своей Compose-конфигурации.
+2. Замените содержимое смонтированного Caddyfile на явные публичные имена,
+   **без** глобального `local_certs` и без wildcard:
+
+   ```caddyfile
+   auth.apps.example.com {
+       reverse_proxy {$KC_UPSTREAM}
+   }
+
+   hub.apps.example.com, first.apps.example.com, second.apps.example.com {
+       reverse_proxy controller:9100
+   }
+   ```
+
+   Caddy получает отдельные публичные сертификаты для перечисленных имён.
+   Добавляйте каждое новое app-имя в этот список и перезагружайте Caddy.
+   Просто заменить `*.apps.internal.lan` на `*.apps.example.com` нельзя:
+   публичный wildcard требует DNS challenge и настроенного DNS-provider module
+   либо отдельно управляемого wildcard-сертификата; стандартный образ `caddy:2`
+   не содержит произвольных DNS-provider modules. Не ослабляйте TLS-проверку.
+3. Согласуйте окружение (реальные секреты храните вне Git):
+
+   ```dotenv
+   PUSHIT_DEV=0
+   PUSHIT_BASE_DOMAIN=apps.example.com
+   PUSHIT_OIDC_ISSUER=https://auth.apps.example.com/realms/pushit
+   PUSHIT_OIDC_CLIENT_ID=pushit-platform
+   KC_HOSTNAME=https://auth.apps.example.com
+   ```
+
+   Также обязательны постоянный случайный `PUSHIT_SESSION_KEY`, непустой
+   `PUSHIT_OIDC_CLIENT_SECRET` и `KC_ADMIN_PASSWORD`. Для внешнего Keycloak
+   используйте его настоящий публичный issuer и соответствующий upstream.
+4. Для свежего realm замените `redirectUris` клиента `pushit-platform` в
+   импортируемом JSON на точные callbacks всех разрешённых app-hosts:
+
+   ```json
+   "redirectUris": [
+     "https://hub.apps.example.com/auth/callback",
+     "https://first.apps.example.com/auth/callback",
+     "https://second.apps.example.com/auth/callback"
+   ]
+   ```
+
+   Вход с app-домена возвращает callback на тот же host, а не всегда на hub.
+   Для каждого нового app-имени обновляйте и Caddy, и разрешённые callbacks
+   клиента Keycloak. Удалите локальные redirect URI. `webOrigins: ["+"]` означает origins
+   настроенных redirect URI; не заменяйте его на `"*"`. Для уже существующего
+   realm изменяйте client в Keycloak, а не рассчитывайте на повторный импорт.
+5. Проверьте discovery issuer из controller с обычной проверкой сертификата,
+   затем полный browser/CLI login и авторизованный deploy/rollback по checklist
+   выше. Публично доверенная цепочка устраняет необходимость локального CA,
+   но сама по себе не подтверждает правильность issuer, redirect URI и login.
+
+В командах следующего раздела замените `apps.internal.lan` на свой согласованный
+публичный base domain. Эти инструкции не выполняют deployment автоматически;
+реальный публичный full-stack login не покрыт локальным smoke или CI.
+
+Справка: [Caddy automatic HTTPS и ACME challenges](https://caddyserver.com/docs/automatic-https),
+[Keycloak: разрешение web origins `+`](https://github.com/keycloak/keycloak/blob/26.0.0/services/src/main/java/org/keycloak/protocol/oidc/utils/WebOriginsUtils.java).
+
 #### Авторизованный deploy A → B → rollback A
 
 Выполняйте только в отдельном тестовом инстансе: команды изменяют приложение

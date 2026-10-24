@@ -56,9 +56,7 @@ mod bindings {
 }
 use wasmtime::component::HasSelf;
 
-use bindings::wasi::blobstore::types::{
-    ContainerMetadata, ObjectId, ObjectMetadata,
-};
+use bindings::wasi::blobstore::types::{ContainerMetadata, ObjectId, ObjectMetadata};
 
 use crate::runtime::ComponentCtx;
 
@@ -104,7 +102,10 @@ impl InputStream for OpendalInputStream {
         if self.pending.is_empty() {
             return Ok(Bytes::new());
         }
-        Ok(self.pending.split_to(size.min(self.pending.len())).to_bytes())
+        Ok(self
+            .pending
+            .split_to(size.min(self.pending.len()))
+            .to_bytes())
     }
 
     async fn blocking_read(&mut self, size: usize) -> StreamResult<Bytes> {
@@ -281,7 +282,9 @@ fn authorize<'m>(
     stores: &'m HashMap<String, BlobEntry>,
 ) -> Result<Resolved, String> {
     if !allowed.iter().any(|a| a == name) {
-        return Err(format!("blobstore '{name}' not granted by capabilities.blobstore"));
+        return Err(format!(
+            "blobstore '{name}' not granted by capabilities.blobstore"
+        ));
     }
     let entry = stores
         .get(name)
@@ -440,7 +443,6 @@ async fn copy_stream(src: &Operator, sp: &str, dest: &Operator, dp: &str) -> Res
     res
 }
 
-
 // ---------- wasi:blobstore/types ----------
 
 impl bindings::wasi::blobstore::types::Host for ComponentCtx {}
@@ -479,9 +481,7 @@ impl bindings::wasi::blobstore::types::HostOutgoingValue for ComponentCtx {
             return Err("finish: value never bound by write-data".to_string());
         };
         while let Some(b) = st.buffered.pop_front() {
-            w.write(Buffer::from(b))
-                .await
-                .map_err(|e| e.to_string())?;
+            w.write(Buffer::from(b)).await.map_err(|e| e.to_string())?;
         }
         st.buffered_len = 0;
         w.close().await.map_err(|e| e.to_string())?;
@@ -623,11 +623,10 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
             .map(|v: &OutgoingValue| v.st.clone())
             .map_err(|e| e.to_string())?;
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        let w = c
-            .op
-            .writer(&key(&c.prefix, &name))
-            .await
-            .map_err(|e| e.to_string())?;
+        let w =
+            c.op.writer(&key(&c.prefix, &name))
+                .await
+                .map_err(|e| e.to_string())?;
         let mut st = st.lock().await;
         if st.writer.is_some() {
             return Err("write-data: outgoing-value already bound".to_string());
@@ -652,12 +651,11 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
         self_: Resource<Container>,
     ) -> Result<Resource<StreamObjectNames>, String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        let mut l = c
-            .op
-            .lister_with(&c.prefix)
-            .recursive(true)
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut l =
+            c.op.lister_with(&c.prefix)
+                .recursive(true)
+                .await
+                .map_err(|e| e.to_string())?;
         let mut names = Vec::new();
         while let Some(e) = l.try_next().await.map_err(|e| e.to_string())? {
             let p = e.path();
@@ -665,16 +663,18 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
             if p.ends_with('/') || p == c.prefix {
                 continue;
             }
-            names.push(
-                p.strip_prefix(&c.prefix).unwrap_or(p).to_string(),
-            );
+            names.push(p.strip_prefix(&c.prefix).unwrap_or(p).to_string());
         }
         self.table()
             .push(StreamObjectNames { names, pos: 0 })
             .map_err(|e| e.to_string())
     }
 
-    async fn delete_object(&mut self, self_: Resource<Container>, name: String) -> Result<(), String> {
+    async fn delete_object(
+        &mut self,
+        self_: Resource<Container>,
+        name: String,
+    ) -> Result<(), String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
         c.op.delete(&key(&c.prefix, &name))
             .await
@@ -688,15 +688,18 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
     ) -> Result<(), String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
         for n in &names {
-            c.op
-                .delete(&key(&c.prefix, n))
+            c.op.delete(&key(&c.prefix, n))
                 .await
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
     }
 
-    async fn has_object(&mut self, self_: Resource<Container>, name: String) -> Result<bool, String> {
+    async fn has_object(
+        &mut self,
+        self_: Resource<Container>,
+        name: String,
+    ) -> Result<bool, String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
         c.op.exists(&key(&c.prefix, &name))
             .await
@@ -709,11 +712,10 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
         name: String,
     ) -> Result<ObjectMetadata, String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        let m = c
-            .op
-            .stat(&key(&c.prefix, &name))
-            .await
-            .map_err(|e| e.to_string())?;
+        let m =
+            c.op.stat(&key(&c.prefix, &name))
+                .await
+                .map_err(|e| e.to_string())?;
         Ok(ObjectMetadata {
             name,
             container: c.name.clone(),
@@ -724,8 +726,7 @@ impl bindings::wasi::blobstore::container::HostContainer for ComponentCtx {
 
     async fn clear(&mut self, self_: Resource<Container>) -> Result<(), String> {
         let c = self.table().get(&self_).map_err(|e| e.to_string())?;
-        c.op
-            .delete_with(&c.prefix)
+        c.op.delete_with(&c.prefix)
             .recursive(true)
             .await
             .map_err(|e| e.to_string())
@@ -743,10 +744,7 @@ impl bindings::wasi::blobstore::container::HostStreamObjectNames for ComponentCt
         self_: Resource<StreamObjectNames>,
         len: u64,
     ) -> Result<(Vec<String>, bool), String> {
-        let s = self
-            .table()
-            .get_mut(&self_)
-            .map_err(|e| e.to_string())?;
+        let s = self.table().get_mut(&self_).map_err(|e| e.to_string())?;
         let s: &mut StreamObjectNames = s;
         let end = (s.pos + len as usize).min(s.names.len());
         let batch = s.names[s.pos..end].to_vec();
@@ -759,10 +757,7 @@ impl bindings::wasi::blobstore::container::HostStreamObjectNames for ComponentCt
         self_: Resource<StreamObjectNames>,
         num: u64,
     ) -> Result<(u64, bool), String> {
-        let s = self
-            .table()
-            .get_mut(&self_)
-            .map_err(|e| e.to_string())?;
+        let s = self.table().get_mut(&self_).map_err(|e| e.to_string())?;
         let s: &mut StreamObjectNames = s;
         let skipped = num.min((s.names.len() - s.pos) as u64);
         s.pos += skipped as usize;
@@ -791,8 +786,7 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
 
     async fn delete_container(&mut self, name: String) -> Result<(), String> {
         let c = self.open_container(&name)?;
-        c.op
-            .delete_with(&c.prefix)
+        c.op.delete_with(&c.prefix)
             .recursive(true)
             .await
             .map_err(|e| e.to_string())
@@ -805,12 +799,11 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
             Ok(c) => c,
             Err(_) => return Ok(false),
         };
-        let mut l = c
-            .op
-            .lister_with(&c.prefix)
-            .recursive(true)
-            .await
-            .map_err(|e| e.to_string())?;
+        let mut l =
+            c.op.lister_with(&c.prefix)
+                .recursive(true)
+                .await
+                .map_err(|e| e.to_string())?;
         while let Some(e) = l.try_next().await.map_err(|e| e.to_string())? {
             if !e.path().ends_with('/') && e.path() != c.prefix {
                 return Ok(true);
@@ -824,7 +817,12 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
         let d = self.resolve_id(&dest)?;
         let (sp, dp) = (key(&s.prefix, &src.object), key(&d.prefix, &dest.object));
         if s.logical == d.logical {
-            return s.op.copy(&sp, &dp).await.map(|_| ()).map_err(|e| e.to_string());
+            return s
+                .op
+                .copy(&sp, &dp)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
         }
         // cross-store: stream read → write fallback
         copy_stream(&s.op, &sp, &d.op, &dp)
@@ -837,14 +835,21 @@ impl bindings::wasi::blobstore::blobstore::Host for ComponentCtx {
         let d = self.resolve_id(&dest)?;
         let (sp, dp) = (key(&s.prefix, &src.object), key(&d.prefix, &dest.object));
         if s.logical == d.logical {
-            return s.op.rename(&sp, &dp).await.map(|_| ()).map_err(|e| e.to_string());
+            return s
+                .op
+                .rename(&sp, &dp)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
         }
         copy_stream(&s.op, &sp, &d.op, &dp)
             .await
             .map_err(|e| e.to_string())?;
-        s.op.delete(&sp).await.map(|_| ()).map_err(|e| e.to_string())
+        s.op.delete(&sp)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
-
 }
 
 impl ComponentCtx {
@@ -860,7 +865,9 @@ impl ComponentCtx {
                 });
             }
         }
-        Err(format!("container '{name}' not granted by capabilities.blobstore"))
+        Err(format!(
+            "container '{name}' not granted by capabilities.blobstore"
+        ))
     }
 
     /// Resolve an object-id to its backend (operator + prefix + logical name).

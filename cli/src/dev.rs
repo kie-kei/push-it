@@ -52,9 +52,10 @@ pub fn run(args: &DevArgs) -> Result<()> {
 }
 
 async fn run_async(args: &DevArgs) -> Result<()> {
-    let manifest_abs = args.manifest.canonicalize().with_context(|| {
-        format!("read {}", args.manifest.display())
-    })?;
+    let manifest_abs = args
+        .manifest
+        .canonicalize()
+        .with_context(|| format!("read {}", args.manifest.display()))?;
     let manifest_text = std::fs::read_to_string(&manifest_abs)?;
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(&manifest_text).context("parse pushit.yaml")?;
@@ -103,12 +104,23 @@ async fn run_async(args: &DevArgs) -> Result<()> {
     }
     let declared: Vec<_> = manifest.secrets.iter().collect();
     if !declared.is_empty() {
-        let provided: Vec<_> = args.env.iter().filter_map(|e| e.split('=').next()).collect();
-        let missing: Vec<_> = declared.iter().filter(|s| !provided.contains(&&s[..])).collect();
+        let provided: Vec<_> = args
+            .env
+            .iter()
+            .filter_map(|e| e.split('=').next())
+            .collect();
+        let missing: Vec<_> = declared
+            .iter()
+            .filter(|s| !provided.contains(&&s[..]))
+            .collect();
         if !missing.is_empty() {
             println!(
                 "warn: manifest secrets not provided locally (pass --env): {}",
-                missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                missing
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
         }
     }
@@ -168,8 +180,18 @@ async fn run_async(args: &DevArgs) -> Result<()> {
                 let data_dir = data_dir.clone();
                 async move {
                     handle(
-                        &runtime, req, &dir, &app_name, &data_dir, env, dsns, sql_allowed,
-                        blob_allowed, http_out, logs, dist,
+                        &runtime,
+                        req,
+                        &dir,
+                        &app_name,
+                        &data_dir,
+                        env,
+                        dsns,
+                        sql_allowed,
+                        blob_allowed,
+                        http_out,
+                        logs,
+                        dist,
                     )
                     .await
                 }
@@ -203,7 +225,9 @@ async fn handle(
             Ok(c) => c.to_bytes(),
             Err(e) => return Ok(err(StatusCode::BAD_REQUEST, &e.to_string())),
         };
-        let mut hreq = hyper::Request::builder().method(parts.method).uri(parts.uri);
+        let mut hreq = hyper::Request::builder()
+            .method(parts.method)
+            .uri(parts.uri);
         for (k, v) in &parts.headers {
             hreq = hreq.header(k, v);
         }
@@ -278,7 +302,10 @@ async fn handle(
         Ok(b) => b,
         Err(e) => return Ok(err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())),
     };
-    let mime = mime_guess::from_path(&path).first_raw().unwrap_or("application/octet-stream").to_string();
+    let mime = mime_guess::from_path(&path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string();
     Ok(Response::builder()
         .header(hyper::header::CONTENT_TYPE, mime)
         .header(hyper::header::CACHE_CONTROL, "no-cache")
@@ -286,7 +313,9 @@ async fn handle(
         .unwrap())
 }
 
-async fn buffered(r: hyper::Response<pushit_controller::wasmtime_wasi_http::body::HyperOutgoingBody>) -> Response<FullBody> {
+async fn buffered(
+    r: hyper::Response<pushit_controller::wasmtime_wasi_http::body::HyperOutgoingBody>,
+) -> Response<FullBody> {
     let (parts, body) = r.into_parts();
     let bytes = match BodyExt::collect(body).await {
         Ok(c) => c.to_bytes(),

@@ -2,11 +2,11 @@
 mod bindings;
 
 use bindings::exports::wasi::http::incoming_handler::Guest;
+use bindings::wasi::blobstore::blobstore;
+use bindings::wasi::blobstore::types::{IncomingValue, OutgoingValue};
 use bindings::wasi::http::types::{
     Fields, IncomingRequest, OutgoingBody, OutgoingResponse, ResponseOutparam,
 };
-use bindings::wasi::blobstore::blobstore;
-use bindings::wasi::blobstore::types::{IncomingValue, OutgoingValue};
 use bindings::wasi::logging::logging::{self, Level};
 use bindings::wasi::sql::readwrite;
 use bindings::wasi::sql::types::{Connection, DataType, Error, Statement};
@@ -88,8 +88,9 @@ fn sql_roundtrip() -> Result<String, String> {
             DataType::Uint32(u) => u.to_string(),
             DataType::Uint64(u) => u.to_string(),
             DataType::Float(f) | DataType::Double(f) => f.to_string(),
-            DataType::Str(s) | DataType::Date(s) | DataType::Time(s)
-            | DataType::Timestamp(s) => format!("{s:?}"),
+            DataType::Str(s) | DataType::Date(s) | DataType::Time(s) | DataType::Timestamp(s) => {
+                format!("{s:?}")
+            }
             DataType::Binary(b) => format!("{b:?}"),
         };
         fields.push(format!("{:?}:{v}", r.field_name));
@@ -162,10 +163,7 @@ fn blob_roundtrip() -> Result<String, String> {
 }
 
 // blocking_write_and_flush accepts at most 4096 bytes per call.
-fn write_chunk(
-    s: &bindings::wasi::io::streams::OutputStream,
-    mut b: &[u8],
-) -> Result<(), String> {
+fn write_chunk(s: &bindings::wasi::io::streams::OutputStream, mut b: &[u8]) -> Result<(), String> {
     while !b.is_empty() {
         let n = b.len().min(4096);
         s.blocking_write_and_flush(&b[..n])
