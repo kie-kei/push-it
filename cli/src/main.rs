@@ -76,9 +76,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<SkillCmd>,
     },
-    /// Authenticate via OIDC browser (~1 year) or a local hidden-password prompt (30 days).
+    /// Authenticate via OIDC browser (~1 year) or standalone owner password (30 days).
     Login(LoginArgs),
-    /// Manage the standalone local owner and revocable API tokens.
+    /// Manage the standalone owner and revocable API tokens.
     Auth {
         #[command(subcommand)]
         cmd: AuthCmd,
@@ -124,6 +124,9 @@ struct LoginArgs {
     /// Use standalone owner authentication (never opens a browser or puts tokens in URLs).
     #[arg(long)]
     local: bool,
+    /// Use standalone owner authentication over HTTPS through a reverse proxy.
+    #[arg(long, conflicts_with = "local")]
+    builtin: bool,
     /// Read one password line from stdin instead of the hidden terminal prompt.
     #[arg(long)]
     password_stdin: bool,
@@ -269,7 +272,13 @@ fn main() -> Result<()> {
         },
         Cmd::Login(args) => {
             let target_profile = cli.profile.clone().or_else(|| store.active.clone());
-            let local = args.local || args.password_stdin || local_mode(&server);
+            if args.local {
+                local_server(&server)?;
+            }
+            if args.builtin {
+                builtin_server(&server)?;
+            }
+            let local = args.local || args.builtin || args.password_stdin || local_mode(&server);
             if local {
                 local_login(&server, target_profile.as_deref(), args.password_stdin)
             } else {
@@ -289,7 +298,7 @@ fn main() -> Result<()> {
                     );
                 }
                 pushit_controller::local_auth::LocalAuth::setup(&data_dir, &password)?;
-                println!("Owner initialized. Start the controller with PUSHIT_AUTH_MODE=local and this PUSHIT_DATA directory.");
+                println!("Owner initialized. Start the controller with PUSHIT_AUTH_MODE=local or builtin and this PUSHIT_DATA directory.");
                 Ok(())
             }
             AuthCmd::Tokens => show(client.get(url(&server, "/api/tokens")).send()?),
@@ -429,7 +438,9 @@ fn client_for(server: &str, dev: bool, token: Option<String>) -> Client {
     if dev {
         headers.insert("X-Pushit-Dev", HeaderValue::from_static("1"));
     }
-    let mut builder = Client::builder().default_headers(headers);
+    let mut builder = Client::builder()
+        .default_headers(headers)
+        .redirect(reqwest::redirect::Policy::none());
     if local_server(server).is_ok() {
         builder = builder
             .no_proxy()
@@ -1156,28 +1167,52 @@ fn local_client() -> Result<Client> {
         .timeout(std::time::Duration::from_secs(30))
         .build()?)
 }
+fn builtin_server(server: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(server)?;
+    let host = url.host_str().unwrap_or("");
+    let base = host.strip_prefix("hub.").unwrap_or("");
+    anyhow::ensure!(url.scheme() == "https" && base.contains('.')
+        && !base.ends_with(".localhost") && base != "localhost"
+        && pushit_controller::config::valid_dns_name(host)
+        && url.port_or_known_default().is_some_and(|p| p != 0)
+        && url.username().is_empty() && url.password().is_none()
+        && url.path() == "/" && url.query().is_none() && url.fragment().is_none()
+        && server == url.as_str().trim_end_matches('/'),
+        "builtin login requires a canonical https://hub.<base-domain>[:port] origin (no credentials, path or URL parameters)");
+    Ok(url)
+}
+fn owner_client(server: &str) -> Result<Client> {
+    if local_server(server).is_ok() {
+        return local_client();
+    }
+    builtin_server(server)?;
+    Ok(Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?)
+}
 fn local_mode(server: &str) -> bool {
-    if local_server(server).is_err() {
+    if local_server(server).is_err() && builtin_server(server).is_err() {
         return false;
     }
-    local_client()
+    owner_client(server)
         .ok()
         .and_then(|c| c.get(format!("{server}/auth/mode")).send().ok())
         .filter(|r| r.status().is_success())
         .and_then(|r| r.json::<serde_json::Value>().ok())
-        .is_some_and(|v| v["mode"] == "local")
+        .is_some_and(|v| v["mode"] == "local" || v["mode"] == "builtin")
 }
 fn local_login(server: &str, target_profile: Option<&str>, stdin: bool) -> Result<()> {
-    local_server(server)?;
+    let client = owner_client(server)?;
     let password = read_password(stdin)?;
-    let response = local_client()?
+    let response = client
         .post(format!("{server}/auth/local/token"))
         .header("x-pushit-cli", "1")
         .json(&serde_json::json!({"password": password}))
         .send()?;
     anyhow::ensure!(
         response.status().is_success(),
-        "local login rejected (check password, owner setup and login attempt limit)"
+        "owner login rejected (check password, owner setup and login attempt limit)"
     );
     let result: serde_json::Value = response.json()?;
     let token = result["token"].as_str().context("missing token")?;
@@ -1185,11 +1220,11 @@ fn local_login(server: &str, target_profile: Option<&str>, stdin: bool) -> Resul
         let mut store = profiles::load();
         store.set_token(name, token)?;
         profiles::save(&store)?;
-        println!("Local owner token saved to profile '{name}' (30 days).");
+        println!("Owner token saved to profile '{name}' (30 days).");
     } else {
         let path = saved_token_path().context("cannot determine config dir (set HOME)")?;
         profiles::write_private(&path, token.as_bytes())?;
-        println!("Local owner token saved (30 days).");
+        println!("Owner token saved (30 days).");
     }
     println!(
         "Token ID: {} (pushit auth revoke <id> revokes it)",
@@ -1809,5 +1844,37 @@ mod version_tests {
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod owner_login_tests {
+    use super::*;
+    #[test]
+    fn password_destinations_require_https_hub_or_explicit_local_loopback_contract() {
+        for server in [
+            "http://hub.platform.test",
+            "http://192.0.2.1",
+            "https://platform.test",
+            "https://hub.platform.test/path",
+            "https://hub.platform.test?x=1",
+            "https://user@hub.platform.test",
+            "https://hub.platform.test#x",
+            "https://hub.platform.test:0",
+            "https://HUB.platform.test",
+            "https://hub.platform.test:08443",
+            "https://hub.localhost",
+            "https://hub.platform.test/../",
+            "https://hub.platform.test\\evil",
+            "https://hub.-bad.test",
+            "https://hub.bad..test",
+        ] {
+            assert!(builtin_server(server).is_err(), "accepted {server}");
+        }
+        assert!(builtin_server("https://hub.platform.test").is_ok());
+        assert!(builtin_server("https://hub.platform.test:8443").is_ok());
+        assert!(local_server("http://hub.localhost:9100").is_ok());
+        assert!(local_server("http://hub.platform.test:9100").is_err());
+        assert!(Cli::try_parse_from(["pushit", "login", "--builtin", "--local"]).is_err());
     }
 }

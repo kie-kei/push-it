@@ -942,6 +942,7 @@ async fn call_fn(
                                 .split('=')
                                 .next()
                                 .unwrap_or("")
+                                .trim_start_matches("__Host-")
                                 .starts_with("pushit_")
                         })
                         .collect::<Vec<_>>()
@@ -1037,14 +1038,11 @@ async fn call_fn(
 }
 
 fn local_port_suffix(s: &AppState) -> String {
-    if s.auth.local.is_some() {
-        if let Ok(bind) = s.cfg.bind.parse::<std::net::SocketAddr>() {
-            if bind.port() != 80 {
-                return format!(":{}", bind.port());
-            }
-        }
+    if s.cfg.owner_auth() {
+        s.cfg.auth_port_suffix()
+    } else {
+        String::new()
     }
-    String::new()
 }
 
 // ---------- hub templates ----------

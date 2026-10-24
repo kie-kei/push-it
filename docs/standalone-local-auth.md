@@ -1,6 +1,8 @@
-# Standalone local owner authentication (Stage 1)
+# Standalone local owner authentication
 
 Run the **whole existing controller** on your computer without Keycloak or Caddy. This is not `pushit dev`: deployments, immutable versions, secrets, logs, the hub, and application subdomains still use the controller and its existing data directory.
+
+For an external HTTPS domain, use the separate [builtin reverse-proxy mode](standalone-proxy-auth.md). The local mode below remains loopback-only.
 
 ## First use
 

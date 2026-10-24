@@ -25,17 +25,36 @@ impl Drop for Server {
     }
 }
 impl Server {
-    async fn start() -> Self {
+    async fn start(builtin: bool) -> Self {
+        Self::start_with_origin(if builtin {
+            Some("https://platform.test:8443")
+        } else {
+            None
+        })
+        .await
+    }
+    async fn start_with_origin(origin: Option<&str>) -> Self {
+        let builtin = origin.is_some();
         let dir = tempfile::tempdir().unwrap();
         LocalAuth::setup(dir.path(), PASSWORD).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let cfg = Config {
             data_dir: dir.path().into(),
-            base_domain: "localhost".into(),
+            base_domain: if builtin {
+                "platform.test"
+            } else {
+                "localhost"
+            }
+            .into(),
+            external_origin: origin.map(str::to_owned),
             bind: format!("127.0.0.1:{port}"),
             dev: false,
-            auth_mode: AuthMode::Local,
+            auth_mode: if builtin {
+                AuthMode::Builtin
+            } else {
+                AuthMode::Local
+            },
             oidc_issuer: None,
             oidc_client_id: None,
             oidc_client_secret: None,
@@ -60,7 +79,7 @@ impl Server {
                     app,
                     "r1",
                     artifact.to_str().unwrap(),
-                    &format!("{app}.localhost"),
+                    &format!("{app}.{}", state.cfg.base_domain),
                     &format!("name: {app}"),
                 )
                 .unwrap();
@@ -82,10 +101,22 @@ impl Server {
     fn request(&self, method: Method, host: &str, path: &str) -> reqwest::RequestBuilder {
         self.client
             .request(method, format!("http://127.0.0.1:{}{path}", self.port))
-            .header(header::HOST, format!("{host}.localhost:{}", self.port))
+            .header(
+                header::HOST,
+                format!(
+                    "{host}.{}{}",
+                    self.state.cfg.base_domain,
+                    self.state.cfg.auth_port_suffix()
+                ),
+            )
     }
     fn origin(&self, host: &str) -> String {
-        format!("http://{host}.localhost:{}", self.port)
+        format!(
+            "{}://{host}.{}{}",
+            self.state.cfg.auth_scheme(),
+            self.state.cfg.base_domain,
+            self.state.cfg.auth_port_suffix()
+        )
     }
     async fn login(&self) -> String {
         let page = self
@@ -95,6 +126,13 @@ impl Server {
             .unwrap();
         assert_eq!(page.status(), 200);
         let challenge = cookie(&page, "pushit_local_login");
+        if self.state.cfg.auth_mode == AuthMode::Builtin {
+            assert!(challenge.starts_with("__Host-"));
+            assert!(page.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .contains("; Secure"));
+        }
         assert!(!page.headers()[header::SET_COOKIE]
             .to_str()
             .unwrap()
@@ -129,7 +167,7 @@ fn cookie(response: &Response, name: &str) -> String {
         .get_all(header::SET_COOKIE)
         .iter()
         .map(|v| v.to_str().unwrap())
-        .find(|v| v.starts_with(&format!("{name}=")))
+        .find(|v| v.starts_with(&format!("{name}=")) || v.starts_with(&format!("__Host-{name}=")))
         .unwrap()
         .split(';')
         .next()
@@ -153,7 +191,13 @@ fn path(url: &str) -> String {
 
 #[tokio::test]
 async fn local_hub_login_handoff_isolation_csrf_logout_over_http() {
-    let s = Server::start().await;
+    browser_flow(Server::start(false).await).await;
+}
+#[tokio::test]
+async fn builtin_https_authorities_handoff_isolation_csrf_logout_over_http_backend() {
+    browser_flow(Server::start(true).await).await;
+}
+async fn browser_flow(s: Server) {
     assert_eq!(
         s.request(Method::GET, "hub", "/api/apps")
             .header("x-pushit-dev", "1")
@@ -171,11 +215,11 @@ async fn local_hub_login_handoff_isolation_csrf_logout_over_http() {
         .await
         .unwrap();
     assert_eq!(hub.status(), 200);
-    assert!(hub
-        .text()
-        .await
-        .unwrap()
-        .contains(&format!("//first.localhost:{}", s.port)));
+    assert!(hub.text().await.unwrap().contains(&format!(
+        "//first.{}{}",
+        s.state.cfg.base_domain,
+        s.state.cfg.auth_port_suffix()
+    )));
     for origin in [None, Some(s.origin("first")), Some("null".into())] {
         let mut r = s
             .request(Method::PUT, "hub", "/api/secrets/global/TEST")
@@ -369,7 +413,13 @@ async fn local_hub_login_handoff_isolation_csrf_logout_over_http() {
 
 #[tokio::test]
 async fn local_cli_token_login_management_revoke_and_bad_hosts_over_http() {
-    let s = Server::start().await;
+    token_flow(Server::start(false).await).await;
+}
+#[tokio::test]
+async fn builtin_cli_token_login_management_revoke_and_bad_hosts_over_http_backend() {
+    token_flow(Server::start(true).await).await;
+}
+async fn token_flow(s: Server) {
     for origin in [Some(s.origin("second")), Some("null".into())] {
         let mut r = s
             .request(Method::POST, "hub", "/auth/local/token")
@@ -496,4 +546,162 @@ async fn local_cli_token_login_management_revoke_and_bad_hosts_over_http() {
             .status(),
         401
     );
+}
+
+#[tokio::test]
+async fn builtin_ignores_forwarding_headers_and_rejects_spoofed_authorities_and_origins() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+    let s = Server::start(true).await;
+    let owner = s.login().await;
+    for host in [
+        "hub.platform.test",
+        "hub.platform.test:443",
+        "hub.platform.test:9100",
+        "HUB.platform.test:8443",
+        "hub.platform.test.:8443",
+        "evil.test:8443",
+        "hub.platform.test.evil:8443",
+        "user@hub.platform.test:8443",
+        "hub.platform.test:08443",
+    ] {
+        let r = router(s.state.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/login")
+                    .header("host", host)
+                    .header("x-forwarded-host", "hub.platform.test:8443")
+                    .header("x-forwarded-proto", "https")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403, "accepted {host}");
+    }
+    let r = router(s.state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .header("host", "hub.platform.test:8443")
+                .header("host", "evil.test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    let r = router(s.state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/auth/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    // Forwarded metadata cannot downgrade the fixed origin or redirect to an attacker.
+    let r = s
+        .request(Method::GET, "first", "/auth/login")
+        .header("forwarded", "for=192.0.2.1;proto=http;host=evil.test")
+        .header("x-forwarded-proto", "http")
+        .header("x-forwarded-host", "evil.test")
+        .header("x-forwarded-port", "80")
+        .send()
+        .await
+        .unwrap();
+    assert!(location(&r).starts_with("https://hub.platform.test:8443/"));
+    for c in r.headers().get_all(header::SET_COOKIE) {
+        let c = c.to_str().unwrap();
+        assert!(c.starts_with("__Host-") && c.contains("; Secure") && !c.contains("Domain="));
+    }
+    for origin in [
+        "http://hub.platform.test:8443",
+        "https://hub.platform.test",
+        "https://first.platform.test:8443",
+        "null",
+    ] {
+        let r = s
+            .request(Method::PUT, "hub", "/api/secrets/global/TEST")
+            .header(header::COOKIE, &owner)
+            .header("x-pushit-csrf", "1")
+            .header(header::ORIGIN, origin)
+            .header("x-forwarded-proto", "https")
+            .body("synthetic")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 403);
+    }
+    let r = router(s.state.clone())
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/secrets/global/TEST")
+                .header("host", "hub.platform.test:8443")
+                .header("cookie", &owner)
+                .header("x-pushit-csrf", "1")
+                .header("origin", "https://hub.platform.test:8443")
+                .header("origin", "https://hub.platform.test:8443")
+                .body(Body::from("synthetic"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    // Unprefixed cookies injected by a sibling's Domain cookie do not authenticate.
+    let r = s
+        .request(Method::GET, "hub", "/api/apps")
+        .header(header::COOKIE, owner.replace("__Host-", ""))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 401);
+    assert!(s.state.db.global_secret_names().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn builtin_default_https_port_is_canonical_and_bound() {
+    let s = Server::start_with_origin(Some("https://platform.test")).await;
+    assert_eq!(s.state.cfg.hub_authority(), "hub.platform.test");
+    assert_eq!(s.origin("hub"), "https://hub.platform.test");
+    for host in ["hub.platform.test:443", "hub.platform.test:8443"] {
+        assert_eq!(
+            s.client
+                .get(format!("http://127.0.0.1:{}/auth/login", s.port))
+                .header(header::HOST, host)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+    }
+    browser_flow(s).await;
+}
+
+#[tokio::test]
+async fn builtin_api_tokens_are_bound_to_external_hub_and_port() {
+    let s = Server::start(true).await;
+    let token = s.token().await;
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        header::AUTHORIZATION,
+        format!("Bearer {}", token["token"].as_str().unwrap())
+            .parse()
+            .unwrap(),
+    );
+    let auth = s.state.auth.local.as_ref().unwrap();
+    assert!(auth
+        .bearer_user(&headers, "hub.platform.test:8443")
+        .is_some());
+    for authority in [
+        "hub.other.test:8443",
+        "hub.platform.test",
+        "hub.platform.test:8444",
+        "first.platform.test:8443",
+    ] {
+        assert!(auth.bearer_user(&headers, authority).is_none());
+    }
 }

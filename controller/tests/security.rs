@@ -19,6 +19,7 @@ fn state(dev: bool) -> (tempfile::TempDir, Arc<AppState>) {
     let cfg = Config {
         data_dir: dir.path().to_owned(),
         base_domain: "localhost".into(),
+        external_origin: None,
         bind: "127.0.0.1:0".into(),
         dev,
         auth_mode: pushit_controller::config::AuthMode::Oidc,

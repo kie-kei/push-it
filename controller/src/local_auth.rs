@@ -1,4 +1,4 @@
-//! Stage 1 local, single-owner authentication. No OIDC wire formats are accepted here.
+//! Standalone local/proxied, single-owner authentication. No OIDC wire formats are accepted here.
 use crate::{auth::User, config::AuthMode, server::AppState};
 use anyhow::{Context, Result};
 use argon2::{
@@ -34,6 +34,7 @@ const LOGIN: &str = "pushit_local_login";
 
 pub struct LocalAuth {
     db: Mutex<Connection>,
+    secure: bool,
     work: Arc<tokio::sync::Semaphore>,
 }
 #[derive(Clone)]
@@ -66,6 +67,9 @@ fn owner() -> User {
 
 impl LocalAuth {
     pub fn open(data: &Path) -> Result<Self> {
+        Self::open_mode(data, false)
+    }
+    pub fn open_mode(data: &Path, secure: bool) -> Result<Self> {
         std::fs::create_dir_all(data)?;
         let path = data.join("local-auth.db");
         let mut options = std::fs::OpenOptions::new();
@@ -100,6 +104,7 @@ impl LocalAuth {
           CREATE INDEX IF NOT EXISTS credential_family ON credentials(family,kind,expires);")?;
         Ok(Self {
             db: Mutex::new(db),
+            secure,
             work: Arc::new(tokio::sync::Semaphore::new(2)),
         })
     }
@@ -183,14 +188,19 @@ impl LocalAuth {
         Ok(token)
     }
     fn session(&self, headers: &HeaderMap, authority: &str, hub: bool) -> Option<Session> {
-        let token = cookie(headers, if hub { OWNER } else { APP })?;
+        let token = cookie(
+            headers,
+            &cookie_name(if hub { OWNER } else { APP }, self.secure),
+        )?;
         let family = self.db.lock().query_row("SELECT family FROM credentials WHERE hash=?1 AND kind=?2 AND authority=?3 AND expires>?4 AND (kind!='app' OR EXISTS(SELECT 1 FROM credentials AS parent WHERE parent.kind='owner' AND parent.family=credentials.family AND parent.expires>?4))", params![hash(&token),if hub {"owner"} else {"app"},authority,now()], |r| r.get(0)).optional().ok()??;
         Some(Session { family, token })
     }
     pub fn browser_user(&self, headers: &HeaderMap, authority: &str, hub: bool) -> Option<User> {
         self.session(headers, authority, hub).map(|_| owner())
     }
-    pub fn bearer_user(&self, headers: &HeaderMap) -> Option<User> {
+    /// HTTPS tokens are scoped to the configured hub authority; retain the original
+    /// authority-free token semantics only for the separate local HTTP mode.
+    pub fn bearer_user(&self, headers: &HeaderMap, authority: &str) -> Option<User> {
         let token = headers
             .get(header::AUTHORIZATION)?
             .to_str()
@@ -199,8 +209,8 @@ impl LocalAuth {
         self.db
             .lock()
             .query_row(
-                "SELECT 1 FROM credentials WHERE hash=?1 AND kind='token' AND expires>?2",
-                params![hash(token), now()],
+                "SELECT 1 FROM credentials WHERE hash=?1 AND kind='token' AND expires>?2 AND (?3=0 OR authority=?4)",
+                params![hash(token), now(), self.secure, authority],
                 |_| Ok(()),
             )
             .optional()
@@ -274,8 +284,20 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     }
     found
 }
-fn set_cookie(name: &str, value: &str, ttl: u64) -> String {
-    format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={ttl}")
+fn cookie_name(name: &str, secure: bool) -> String {
+    if secure {
+        format!("__Host-{name}")
+    } else {
+        name.into()
+    }
+}
+fn set_cookie(s: &AppState, name: &str, value: &str, ttl: u64) -> String {
+    let secure = s.cfg.auth_mode == AuthMode::Builtin;
+    format!(
+        "{}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={ttl}{}",
+        cookie_name(name, secure),
+        if secure { "; Secure" } else { "" }
+    )
 }
 fn safe_path(path: &str) -> &str {
     if path.starts_with('/')
@@ -336,10 +358,10 @@ fn redirect(url: &str, cookies: Vec<String>) -> Response {
 fn denied() -> Response {
     response(StatusCode::FORBIDDEN, "local auth request rejected")
 }
-fn origin(headers: &HeaderMap, authority: &str) -> bool {
+fn origin(s: &AppState, headers: &HeaderMap, authority: &str) -> bool {
     headers.get_all(header::ORIGIN).iter().count() == 1
         && headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
-            == Some(format!("http://{authority}").as_str())
+            == Some(format!("{}://{authority}", s.cfg.auth_scheme()).as_str())
 }
 fn authority(headers: &HeaderMap, port: u16) -> Option<String> {
     if headers.get_all(header::HOST).iter().count() != 1 {
@@ -366,35 +388,37 @@ fn authority(headers: &HeaderMap, port: u16) -> Option<String> {
     Some(raw.to_owned())
 }
 pub fn local_authority(s: &AppState, headers: &HeaderMap) -> Option<String> {
-    authority(
-        headers,
-        s.cfg.bind.parse::<std::net::SocketAddr>().ok()?.port(),
-    )
+    if s.cfg.auth_mode == AuthMode::Local {
+        return authority(headers, s.cfg.auth_port());
+    }
+    if headers.get_all(header::HOST).iter().count() != 1 {
+        return None;
+    }
+    let raw = headers.get(header::HOST)?.to_str().ok()?;
+    let parsed: http::uri::Authority = raw.parse().ok()?;
+    let host = parsed.host();
+    if !crate::config::valid_dns_name(host)
+        || !(host == s.cfg.base_domain || host.ends_with(&format!(".{}", s.cfg.base_domain)))
+        || raw != format!("{host}{}", s.cfg.auth_port_suffix())
+    {
+        return None;
+    }
+    Some(raw.into())
 }
 fn hub_authority(s: &AppState) -> String {
-    let port = s
-        .cfg
-        .bind
-        .parse::<std::net::SocketAddr>()
-        .expect("validated local bind")
-        .port();
-    if port == 80 {
-        "hub.localhost".into()
-    } else {
-        format!("hub.localhost:{port}")
-    }
+    s.cfg.hub_authority()
 }
 fn approved_app(s: &AppState, authority: &str) -> bool {
     let host = authority.split(':').next().unwrap_or("");
-    host != "localhost"
-        && host != "hub.localhost"
+    host != s.cfg.base_domain
+        && host != format!("hub.{}", s.cfg.base_domain)
         && s.db.pin_active_by_domain(host).ok().flatten().is_some()
 }
 
 /// All local routes pass this gate before the legacy router, including management
 /// routes that would otherwise match on every host.
 pub async fn gate(State(s): State<Arc<AppState>>, req: Request, next: Next) -> Response {
-    if s.cfg.auth_mode != AuthMode::Local {
+    if !s.cfg.owner_auth() {
         return next.run(req).await;
     }
     let Some(authority) = local_authority(&s, req.headers()) else {
@@ -413,12 +437,12 @@ pub async fn gate(State(s): State<Arc<AppState>>, req: Request, next: Next) -> R
         }
         if auth.browser_user(&headers, &authority, true).is_some() {
             if !matches!(*req.method(), http::Method::GET | http::Method::HEAD)
-                && (!origin(&headers, &authority)
+                && (!origin(&s, &headers, &authority)
                     || headers.get("x-pushit-csrf").and_then(|v| v.to_str().ok()) != Some("1"))
             {
                 return denied();
             }
-        } else if auth.bearer_user(&headers).is_none() {
+        } else if auth.bearer_user(&headers, &hub_authority(&s)).is_none() {
             return response(StatusCode::UNAUTHORIZED, "unauthorized");
         }
     } else if !hub {
@@ -429,7 +453,7 @@ pub async fn gate(State(s): State<Arc<AppState>>, req: Request, next: Next) -> R
             *req.method(),
             http::Method::GET | http::Method::HEAD | http::Method::OPTIONS
         ) && auth.browser_user(&headers, &authority, false).is_some()
-            && !origin(&headers, &authority)
+            && !origin(&s, &headers, &authority)
         {
             return denied();
         }
@@ -497,24 +521,26 @@ async fn handle_inner(
     let session = auth.session(&headers, authority, hub);
 
     match (method.as_str(), path.as_str()) {
-        ("GET", "/auth/mode") if hub => {
-            Ok(axum::Json(serde_json::json!({"mode":"local"})).into_response())
-        }
+        ("GET", "/auth/mode") if hub => Ok(axum::Json(
+            serde_json::json!({"mode": if auth.secure {"builtin"} else {"local"}}),
+        )
+        .into_response()),
         ("GET", "/auth/login") if !hub => {
             anyhow::ensure!(approved_app(s, authority), "not an active app");
             let (request, challenge) = auth.begin(authority, &q.return_to)?;
             Ok(redirect(
                 &format!(
-                    "http://{}/auth/local/authorize?request={request}",
+                    "{}://{}/auth/local/authorize?request={request}",
+                    s.cfg.auth_scheme(),
                     hub_authority(s)
                 ),
-                vec![set_cookie(CHALLENGE, &challenge, FLOW_TTL)],
+                vec![set_cookie(s, CHALLENGE, &challenge, FLOW_TTL)],
             ))
         }
         ("GET", "/auth/login") if hub => {
             let challenge = random();
             let return_to = safe_hub_return(&q.return_to);
-            let body=format!("<!doctype html><title>PushIt owner login</title><h1>PushIt owner login</h1><p>Enter your owner password only at hub.localhost.</p><form method=post action=/auth/login><input type=hidden name=csrf value=\"{challenge}\"><input type=hidden name=return_to value=\"{}\"><label>Password <input type=password name=password autocomplete=current-password required maxlength=1024></label><button>Sign in</button></form>",html_escape(return_to));
+            let body=format!("<!doctype html><title>PushIt owner login</title><h1>PushIt owner login</h1><p>Enter your owner password only at {}.</p><form method=post action=/auth/login><input type=hidden name=csrf value=\"{challenge}\"><input type=hidden name=return_to value=\"{}\"><label>Password <input type=password name=password autocomplete=current-password required maxlength=1024></label><button>Sign in</button></form>",html_escape(&hub_authority(s)),html_escape(return_to));
             let mut r = response(StatusCode::OK, body);
             r.headers_mut().insert(
                 header::CONTENT_TYPE,
@@ -522,16 +548,17 @@ async fn handle_inner(
             );
             r.headers_mut().insert(
                 header::SET_COOKIE,
-                set_cookie(LOGIN, &challenge, 300).parse().unwrap(),
+                set_cookie(s, LOGIN, &challenge, 300).parse().unwrap(),
             );
             Ok(r)
         }
         ("POST", "/auth/login") if hub => {
-            anyhow::ensure!(origin(&headers, authority), "wrong origin");
+            anyhow::ensure!(origin(s, &headers, authority), "wrong origin");
             let bytes = axum::body::to_bytes(req.into_body(), 4096).await?;
             let form: PasswordForm = serde_urlencoded::from_bytes(&bytes)?;
             anyhow::ensure!(
-                cookie(&headers, LOGIN).as_deref() == Some(form.csrf.as_str()),
+                cookie(&headers, &cookie_name(LOGIN, auth.secure)).as_deref()
+                    == Some(form.csrf.as_str()),
                 "invalid login challenge"
             );
             anyhow::ensure!(auth.password(form.password).await?, "invalid credentials");
@@ -541,8 +568,8 @@ async fn handle_inner(
             Ok(redirect(
                 return_to,
                 vec![
-                    set_cookie(OWNER, &token, SESSION_TTL),
-                    set_cookie(LOGIN, "", 0),
+                    set_cookie(s, OWNER, &token, SESSION_TTL),
+                    set_cookie(s, LOGIN, "", 0),
                 ],
             ))
         }
@@ -562,19 +589,23 @@ async fn handle_inner(
             let (target, grant) = auth.authorize(&q.request, &session.family)?;
             anyhow::ensure!(approved_app(s, &target), "app no longer active");
             Ok(redirect(
-                &format!("http://{target}/auth/local/complete?grant={grant}"),
+                &format!(
+                    "{}://{target}/auth/local/complete?grant={grant}",
+                    s.cfg.auth_scheme()
+                ),
                 vec![],
             ))
         }
         ("GET", "/auth/local/complete") if !hub => {
             anyhow::ensure!(approved_app(s, authority), "not an active app");
-            let challenge = cookie(&headers, CHALLENGE).context("missing browser challenge")?;
+            let challenge = cookie(&headers, &cookie_name(CHALLENGE, auth.secure))
+                .context("missing browser challenge")?;
             let (path, token) = auth.complete(&q.grant, &challenge, authority)?;
             Ok(redirect(
                 &path,
                 vec![
-                    set_cookie(APP, &token, SESSION_TTL),
-                    set_cookie(CHALLENGE, "", 0),
+                    set_cookie(s, APP, &token, SESSION_TTL),
+                    set_cookie(s, CHALLENGE, "", 0),
                 ],
             ))
         }
@@ -589,7 +620,7 @@ async fn handle_inner(
             Ok(r)
         }
         ("POST", "/auth/logout") => {
-            anyhow::ensure!(origin(&headers, authority), "wrong origin");
+            anyhow::ensure!(origin(s, &headers, authority), "wrong origin");
             let session = session.context("not authenticated")?;
             let bytes = axum::body::to_bytes(req.into_body(), 4096).await?;
             let form: std::collections::HashMap<String, String> =
@@ -613,7 +644,7 @@ async fn handle_inner(
             }
             Ok(redirect(
                 "/",
-                vec![set_cookie(if hub { OWNER } else { APP }, "", 0)],
+                vec![set_cookie(s, if hub { OWNER } else { APP }, "", 0)],
             ))
         }
         ("POST", "/auth/local/token") if hub => {
@@ -626,28 +657,38 @@ async fn handle_inner(
                 "CLI JSON request required"
             );
             anyhow::ensure!(
-                !headers.contains_key(header::ORIGIN) || origin(&headers, authority),
+                !headers.contains_key(header::ORIGIN) || origin(s, &headers, authority),
                 "wrong origin"
             );
             let bytes = axum::body::to_bytes(req.into_body(), 4096).await?;
             let form: PasswordForm = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(auth.password(form.password).await?, "invalid credentials");
-            let token = auth.issue("token", "", "", TOKEN_TTL)?;
+            let token = auth.issue(
+                "token",
+                if auth.secure { authority } else { "" },
+                "",
+                TOKEN_TTL,
+            )?;
             Ok(axum::Json(serde_json::json!({"id":hash(&token),"token":token,"expires_at":now()+TOKEN_TTL,"user":"owner@localhost"})).into_response())
         }
         ("POST", "/api/tokens") if hub => {
             anyhow::ensure!(
                 session.is_some()
-                    && origin(&headers, authority)
+                    && origin(s, &headers, authority)
                     && headers.get("x-pushit-csrf").and_then(|v| v.to_str().ok()) == Some("1"),
                 "owner browser required; bearer tokens cannot mint tokens"
             );
-            let token = auth.issue("token", "", "", TOKEN_TTL)?;
+            let token = auth.issue(
+                "token",
+                if auth.secure { authority } else { "" },
+                "",
+                TOKEN_TTL,
+            )?;
             Ok(axum::Json(serde_json::json!({"id":hash(&token),"token":token,"expires_at":now()+TOKEN_TTL,"user":"owner@localhost"})).into_response())
         }
         ("GET", "/api/tokens") if hub => {
             anyhow::ensure!(
-                session.is_some() || auth.bearer_user(&headers).is_some(),
+                session.is_some() || auth.bearer_user(&headers, &hub_authority(s)).is_some(),
                 "unauthorized"
             );
             let db = auth.db.lock();
@@ -660,12 +701,15 @@ async fn handle_inner(
         ("DELETE", p) if hub && p.starts_with("/api/tokens/") => {
             if session.is_some() {
                 anyhow::ensure!(
-                    origin(&headers, authority)
+                    origin(s, &headers, authority)
                         && headers.get("x-pushit-csrf").and_then(|v| v.to_str().ok()) == Some("1"),
                     "invalid csrf"
                 )
             } else {
-                anyhow::ensure!(auth.bearer_user(&headers).is_some(), "unauthorized")
+                anyhow::ensure!(
+                    auth.bearer_user(&headers, &hub_authority(s)).is_some(),
+                    "unauthorized"
+                )
             }
             let id = p.trim_start_matches("/api/tokens/");
             anyhow::ensure!(
@@ -738,7 +782,7 @@ mod tests {
             header::AUTHORIZATION,
             format!("Bearer {token}").parse().unwrap(),
         );
-        assert!(auth.bearer_user(&bearer).is_some());
+        assert!(auth.bearer_user(&bearer, "").is_some());
         assert!(auth
             .browser_user(&headers(OWNER, &owner), "hub.localhost:9100", true)
             .is_some());
@@ -759,7 +803,7 @@ mod tests {
             header::AUTHORIZATION,
             format!("Bearer {owner}").parse().unwrap(),
         );
-        assert!(auth.bearer_user(&bearer).is_none());
+        assert!(auth.bearer_user(&bearer, "").is_none());
         let mut duplicate = headers(OWNER, &owner);
         duplicate.append(header::COOKIE, format!("{OWNER}={owner}").parse().unwrap());
         assert!(auth
@@ -782,14 +826,14 @@ mod tests {
             header::AUTHORIZATION,
             format!("Bearer {token}").parse().unwrap(),
         );
-        assert!(auth.bearer_user(&bearer).is_some());
+        assert!(auth.bearer_user(&bearer, "").is_some());
         auth.db
             .lock()
             .execute("DELETE FROM credentials WHERE hash=?1", [hash(&token)])
             .unwrap();
         drop(auth);
         let auth = LocalAuth::open(dir.path()).unwrap();
-        assert!(auth.bearer_user(&bearer).is_none());
+        assert!(auth.bearer_user(&bearer, "").is_none());
         let expired = auth.issue("token", "", "", TOKEN_TTL).unwrap();
         auth.db
             .lock()
@@ -802,7 +846,7 @@ mod tests {
             header::AUTHORIZATION,
             format!("Bearer {expired}").parse().unwrap(),
         );
-        assert!(auth.bearer_user(&bearer).is_none());
+        assert!(auth.bearer_user(&bearer, "").is_none());
         auth.db
             .lock()
             .execute(
