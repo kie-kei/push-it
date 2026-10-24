@@ -33,7 +33,43 @@ fn scaffold_build_target_and_deploy_entry_match_cargo_component_output() {
     assert!(wit.contains("import wasi:cli/environment@0.2.0;"));
     assert!(wit.contains("export wasi:http/incoming-handler@0.2.0;"));
     let cargo = fs::read_to_string(app.join("fn/Cargo.toml")).unwrap();
-    assert!(cargo.contains("\"wasi:http\" = \"=0.2.0\""));
-    assert!(cargo.contains("\"wasi:cli\" = \"=0.2.0\""));
+    let cargo: toml::Value = toml::from_str(&cargo).unwrap();
+    let deps = cargo["package"]["metadata"]["component"]["target"]["dependencies"]
+        .as_table()
+        .unwrap();
+    assert_eq!(deps.len(), 4);
+    for package in ["http", "cli", "io", "clocks"] {
+        assert_eq!(
+            deps[&format!("wasi:{package}")]["path"].as_str().unwrap(),
+            format!("wit/deps/{package}")
+        );
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/hello/fn/wit/deps")
+            .join(package);
+        let dest = app.join("fn/wit/deps").join(package);
+        let files: Vec<_> = fs::read_dir(&dest)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(
+            files.len(),
+            match package {
+                "http" | "clocks" => 3,
+                "cli" => 2,
+                "io" => 4,
+                _ => unreachable!(),
+            }
+        );
+        for file in files {
+            assert_eq!(
+                fs::read(&file).unwrap(),
+                fs::read(source.join(file.file_name().unwrap())).unwrap()
+            );
+        }
+    }
+    assert_eq!(
+        fs::read_to_string(app.join("fn/wit/NOTICE.md")).unwrap(),
+        include_str!("../../examples/hello/fn/wit/NOTICE.md")
+    );
     fs::remove_dir_all(root).unwrap();
 }
