@@ -420,7 +420,7 @@ fn deploy_root(
             .unwrap_or("pushit.yaml");
 
         let dir = cache.join(key);
-        println!("==> {key}: sync {repo} ({})", git_ref.unwrap_or("HEAD"));
+        println!("==> {key}: sync repository ({})", git_ref.unwrap_or("HEAD"));
         if let Err(e) = sync_repo(repo, git_ref, &dir) {
             eprintln!("FAIL {key}: sync: {e:#}");
             failed.push(key.to_string());
@@ -497,45 +497,93 @@ fn deploy_root(
 
 /// Clone or update `repo` at `dir`; shallow, `git_ref` = branch or tag.
 fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
-    let run = |mut cmd: std::process::Command| -> Result<()> {
+    // Git stores local clone origins as absolute paths. Resolve only plain
+    // local paths, not URLs or scp-style remotes, for cold/warm consistency.
+    let local_repo = if !repo.contains(':') {
+        fs::canonicalize(repo).ok()
+    } else {
+        None
+    };
+    let repo = match local_repo.as_ref() {
+        Some(path) => path.to_str().context("repository path is not UTF-8")?,
+        None => repo,
+    };
+    // Git diagnostics may contain credentials embedded in repository URLs.
+    let run = |mut cmd: std::process::Command| -> Result<std::process::Output> {
         let out = cmd.output().context("spawn git")?;
         if !out.status.success() {
             bail!(
-                "git failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
+                "git repository sync failed (exit {}); check repository access and branch/tag",
+                out.status
             );
         }
-        Ok(())
+        Ok(out)
     };
+    if let Some(r) = git_ref {
+        if r.starts_with('-') {
+            bail!("invalid branch/tag name: must not start with a dash");
+        }
+        let mut check = std::process::Command::new("git");
+        check.arg("check-ref-format").arg(format!("refs/heads/{r}"));
+        run(check).context("invalid branch/tag name")?;
+    }
     if dir.join(".git").exists() {
+        // Compare raw configured URLs exactly: guessing equivalent identities can
+        // silently use the wrong repository. Never include either URL in errors.
+        let mut origin = std::process::Command::new("git");
+        origin
+            .args(["-C"])
+            .arg(dir)
+            .args(["config", "--get-all", "remote.origin.url"]);
+        let out = run(origin).context("read cached repository origin")?;
+        let configured = String::from_utf8(out.stdout).context("invalid cached origin encoding")?;
+        if configured.strip_suffix('\n') != Some(repo) {
+            bail!("cached repository origin does not exactly match manifest repo; review and move the app cache aside before retrying (cache left unchanged)");
+        }
+        // `clone --branch` prefers a branch over a tag of the same name. Use
+        // fully qualified fetch refs to preserve that choice on a warm cache.
+        let selected_ref = if let Some(r) = git_ref {
+            let branch = format!("refs/heads/{r}");
+            let mut heads = std::process::Command::new("git");
+            heads
+                .arg("-C")
+                .arg(dir)
+                .args(["ls-remote", "--exit-code", "--heads", "origin"])
+                .arg(&branch);
+            let out = heads.output().context("resolve repository branch")?;
+            if out.status.success() {
+                branch
+            } else if out.status.code() == Some(2) {
+                format!("refs/tags/{r}")
+            } else {
+                bail!("could not resolve repository branch; check repository access");
+            }
+        } else {
+            "HEAD".to_string()
+        };
         let mut fetch = std::process::Command::new("git");
         fetch
             .arg("-C")
             .arg(dir)
-            .arg("fetch")
-            .arg("--depth")
-            .arg("1")
-            .arg("origin");
-        // specific ref, else remote HEAD
-        fetch.arg(git_ref.unwrap_or("HEAD"));
+            .args(["fetch", "--depth", "1", "origin"])
+            .arg(selected_ref);
         run(fetch)?;
         let mut reset = std::process::Command::new("git");
         reset
             .arg("-C")
             .arg(dir)
-            .arg("reset")
-            .arg("--hard")
-            .arg("FETCH_HEAD");
+            .args(["reset", "--hard", "FETCH_HEAD"]);
         run(reset)?;
         Ok(())
     } else {
         let mut clone = std::process::Command::new("git");
-        clone.arg("clone").arg("--depth").arg("1");
+        clone.args(["clone", "--depth", "1"]);
         if let Some(r) = git_ref {
             clone.arg("--branch").arg(r);
         }
-        clone.arg(repo).arg(dir);
-        run(clone)
+        clone.arg("--").arg(repo).arg(dir);
+        run(clone)?;
+        Ok(())
     }
 }
 
@@ -1344,4 +1392,151 @@ fn init(args: InitArgs) -> Result<()> {
     )?;
     println!("\nnext: pushit build; then deploy using an authorized profile, or use pushit --dev --server http://127.0.0.1:9100 deploy for a local controller");
     Ok(())
+}
+
+#[cfg(test)]
+mod sync_repo_tests {
+    use super::sync_repo;
+    use std::{fs, path::Path, process::Command};
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn isolated_local_repositories() {
+        let root = std::env::temp_dir().join(format!("pushit-sync-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        // Isolate all Git configuration without mutating the test runner's environment.
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "sync_repo_tests::local_fixture",
+                "--nocapture",
+            ])
+            .env("PUSHIT_SYNC_TEST_ROOT", &root)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_COUNT", "0")
+            .env_remove("GIT_CONFIG_PARAMETERS")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("HOME", &root)
+            .output()
+            .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "run through isolated_local_repositories with isolated Git configuration"]
+    fn local_fixture() {
+        let root = std::path::PathBuf::from(std::env::var_os("PUSHIT_SYNC_TEST_ROOT").unwrap());
+        std::env::set_current_dir(&root).unwrap();
+        let a = root.join("A");
+        let b = root.join("B");
+        for repo in [&a, &b] {
+            fs::create_dir(repo).unwrap();
+            git(repo, &["init", "-b", "main"]);
+            git(repo, &["config", "user.email", "fixture@example.invalid"]);
+            git(repo, &["config", "user.name", "Fixture"]);
+            fs::write(repo.join("content"), "initial").unwrap();
+            git(repo, &["add", "."]);
+            git(repo, &["commit", "-m", "initial"]);
+        }
+        let a_url = format!("file://{}", a.display());
+        let b_url = format!("file://{}", b.display());
+        git(&a, &["tag", "collision"]);
+        git(&a, &["tag", "release"]);
+        fs::write(a.join("content"), "branch").unwrap();
+        git(&a, &["commit", "-am", "branch"]);
+        git(&a, &["branch", "collision"]);
+        let expected = git(&a, &["rev-parse", "HEAD"]);
+        for (name, reference) in [
+            ("default", None),
+            ("branch", Some("main")),
+            ("collision", Some("collision")),
+            ("tag", Some("release")),
+        ] {
+            let cache = root.join(name);
+            sync_repo(&a_url, reference, &cache).unwrap();
+            let cold = git(&cache, &["rev-parse", "HEAD"]);
+            fs::write(cache.join("untracked"), "preserve").unwrap();
+            sync_repo(&a_url, reference, &cache).unwrap();
+            assert_eq!(git(&cache, &["rev-parse", "HEAD"]), cold);
+            if name == "tag" {
+                assert_eq!(cold, git(&a, &["rev-parse", "refs/tags/release"]));
+            } else {
+                assert_eq!(cold, expected);
+            }
+            assert!(cache.join("untracked").exists());
+        }
+        let relative_cache = root.join("relative");
+        sync_repo("A", Some("main"), &relative_cache).unwrap();
+        sync_repo("A", Some("main"), &relative_cache).unwrap();
+        let cache = root.join("branch");
+        let before_head = git(&cache, &["rev-parse", "HEAD"]);
+        let before_fetch = fs::read(cache.join(".git/FETCH_HEAD")).unwrap();
+        let before_config = fs::read(cache.join(".git/config")).unwrap();
+        let error = sync_repo(&b_url, Some("main"), &cache)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("does not exactly match"));
+        assert!(!error.contains(&b_url));
+        assert_eq!(git(&cache, &["rev-parse", "HEAD"]), before_head);
+        assert_eq!(
+            fs::read(cache.join(".git/FETCH_HEAD")).unwrap(),
+            before_fetch
+        );
+        assert_eq!(fs::read(cache.join(".git/config")).unwrap(), before_config);
+        assert!(sync_repo(&a_url, Some("missing-ref"), &cache).is_err());
+        assert_eq!(git(&cache, &["rev-parse", "HEAD"]), before_head);
+        let secret = "https://user:super-secret@example.invalid/B";
+        assert!(!sync_repo(secret, None, &cache)
+            .unwrap_err()
+            .to_string()
+            .contains("super-secret"));
+        git(&cache, &["config", "remote.origin.url", secret]);
+        let error = sync_repo(&a_url, None, &cache).unwrap_err().to_string();
+        assert!(!error.contains("super-secret"));
+        assert!(error.contains("does not exactly match"));
+        git(&cache, &["config", "remote.origin.url", &a_url]);
+        let secret_local = format!("file://{}/super-secret-missing", root.display());
+        assert!(
+            !sync_repo(&secret_local, None, &root.join("missing-source"))
+                .unwrap_err()
+                .to_string()
+                .contains("super-secret")
+        );
+        assert!(sync_repo(&a_url, Some("--upload-pack=bad"), &root.join("bad-ref")).is_err());
+        assert!(sync_repo("--upload-pack=bad", None, &root.join("bad-url")).is_err());
+        assert!(!root.join("bad-ref").exists());
+        // A normal branch advances on a warm cache, not merely on cold clone.
+        fs::write(a.join("content"), "updated").unwrap();
+        git(&a, &["commit", "-am", "updated"]);
+        sync_repo(&a_url, Some("main"), &cache).unwrap();
+        assert_eq!(
+            git(&cache, &["rev-parse", "HEAD"]),
+            git(&a, &["rev-parse", "HEAD"])
+        );
+    }
 }
