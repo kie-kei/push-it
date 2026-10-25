@@ -96,6 +96,8 @@ enum Cmd {
     Init(InitArgs),
     /// Build the artifact archive and deploy to the controller.
     Deploy(DeployArgs),
+    /// Run HTTP checks against a deployed app (`checks:` in pushit.yaml).
+    Verify(VerifyArgs),
     /// Manage app secrets.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -218,6 +220,28 @@ struct LogsArgs {
     /// Number of lines for one-shot tail.
     #[arg(long, default_value_t = 200)]
     tail: u32,
+    /// Show only lines newer than this, e.g. 10m, 2h, 1d.
+    #[arg(long)]
+    since: Option<String>,
+    /// Show only lines containing this substring.
+    #[arg(long)]
+    grep: Option<String>,
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    /// App name; defaults to `name` in --manifest.
+    app: Option<String>,
+    /// Path to pushit.yaml for `checks:`; missing file → default check `GET /`.
+    #[arg(long, default_value = "pushit.yaml")]
+    manifest: PathBuf,
+    /// Base URL of the app itself (e.g. https://name.apps.lan).
+    /// Default: the controller address with a `Host: <domain>` header.
+    #[arg(long)]
+    url: Option<String>,
+    /// Print machine-readable JSON instead of the human report.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -330,6 +354,7 @@ fn main() -> Result<()> {
         Cmd::Dev(a) => dev::run(&a),
         Cmd::Init(a) => init(a),
         Cmd::Deploy(a) => deploy(&server, &client, a),
+        Cmd::Verify(a) => verify(&server, &client, a),
         Cmd::Secret(s) => secret(&server, &client, s),
         Cmd::List => show(client.get(url(&server, "/api/apps")).send()?),
         Cmd::Status { app } => show(
@@ -1463,6 +1488,36 @@ fn delete(server: &str, client: &Client, app: &str) -> Result<()> {
 }
 
 fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
+    let grep = args.grep.filter(|g| !g.is_empty());
+    let since_cutoff = match &args.since {
+        Some(s) => {
+            let secs = parse_since(s)?;
+            Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .saturating_sub(secs),
+            )
+        }
+        None => None,
+    };
+    let keep = |line: &str| -> bool {
+        if let Some(g) = &grep {
+            if !line.contains(g.as_str()) {
+                return false;
+            }
+        }
+        if let Some(cutoff) = since_cutoff {
+            // Log lines are stamped "[dDAYS HH:MM:SS]"; keep undated lines.
+            if let Some(t) = log_line_epoch(line) {
+                if t < cutoff {
+                    return false;
+                }
+            }
+        }
+        true
+    };
     if args.follow {
         let resp = client
             .get(url(server, &format!("/api/apps/{}/logs/stream", args.app)))
@@ -1473,8 +1528,11 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
         for line in BufReader::new(resp).lines() {
             let line = line?;
             if let Some(data) = line.strip_prefix("data:") {
-                writeln!(out, "{}", data.trim_start())?;
-                out.flush()?;
+                let data = data.trim_start();
+                if keep(data) {
+                    writeln!(out, "{data}")?;
+                    out.flush()?;
+                }
             }
         }
     } else {
@@ -1485,7 +1543,237 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
             ))
             .send()?;
         let body = check(resp)?.text()?;
-        print!("{body}");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&body).context("parse logs response")?;
+        let empty = Vec::new();
+        let lines = parsed
+            .get("lines")
+            .and_then(|l| l.as_array())
+            .map(|a| a.iter().filter_map(|l| l.as_str()).collect::<Vec<_>>())
+            .unwrap_or(empty);
+        for line in lines.iter().filter(|l| keep(l)) {
+            println!("{line}");
+        }
+    }
+    Ok(())
+}
+
+/// `--since` duration: `<N>s|m|h|d` → seconds.
+fn parse_since(s: &str) -> Result<u64> {
+    let (num, unit) = s.split_at(s.len().saturating_sub(1));
+    let n: u64 = num
+        .parse()
+        .with_context(|| format!("--since '{s}': expected <N>s|m|h|d, e.g. 10m"))?;
+    let secs = match unit {
+        "s" => Some(n),
+        "m" => n.checked_mul(60),
+        "h" => n.checked_mul(3600),
+        "d" => n.checked_mul(86400),
+        _ => bail!("--since '{s}': unit must be s, m, h or d"),
+    };
+    Ok(secs.ok_or_else(|| anyhow!("--since '{s}': too large"))?)
+}
+
+/// Epoch seconds of a `[dDAYS HH:MM:SS]` log-line stamp (UTC).
+fn log_line_epoch(line: &str) -> Option<u64> {
+    let stamp = line.strip_prefix('[')?.split(']').next()?;
+    let (days, time) = stamp.strip_prefix('d')?.split_once(' ')?;
+    let mut it = time.split(':');
+    let (h, m, s) = (
+        it.next()?.parse::<u64>().ok()?,
+        it.next()?.parse::<u64>().ok()?,
+        it.next()?.parse::<u64>().ok()?,
+    );
+    if it.next().is_some() {
+        return None;
+    }
+    Some(days.parse::<u64>().ok()? * 86400 + h * 3600 + m * 60 + s)
+}
+
+/// One HTTP check from `checks:` in pushit.yaml.
+struct Check {
+    path: String,
+    /// Exact expected status; default pass rule is any status < 400
+    /// (redirects to a login page still prove the app is routed).
+    status: Option<u16>,
+    /// Optional substring expected in the response body.
+    body: Option<String>,
+}
+
+fn parse_checks(manifest: Option<&serde_yaml::Value>) -> Result<Vec<Check>> {
+    // Fail closed: an authored `checks:` that cannot be parsed must fail the
+    // verification, never degrade to the weaker default `GET /`.
+    let Some(raw) = manifest.and_then(|m| m.get("checks")) else {
+        return Ok(vec![Check {
+            path: "/".into(),
+            status: None,
+            body: None,
+        }]);
+    };
+    let list = raw
+        .as_sequence()
+        .with_context(|| "checks: must be a list of {path, status?, body?}")?;
+    anyhow::ensure!(
+        !list.is_empty(),
+        "checks: must not be empty — remove the key to use the default GET /"
+    );
+    let mut checks = Vec::with_capacity(list.len());
+    for (i, entry) in list.iter().enumerate() {
+        let path = entry
+            .get("path")
+            .and_then(|p| p.as_str())
+            .with_context(|| format!("checks[{i}]: `path` is required"))?;
+        anyhow::ensure!(
+            path.starts_with('/'),
+            "checks[{i}].path '{path}': must start with /"
+        );
+        let status = match entry.get("status") {
+            None => None,
+            Some(s) => {
+                let n = s
+                    .as_u64()
+                    .with_context(|| format!("checks[{i}].status: must be an integer"))?;
+                anyhow::ensure!(
+                    (100..=599).contains(&n),
+                    "checks[{i}].status: must be 100-599"
+                );
+                Some(n as u16)
+            }
+        };
+        let body = match entry.get("body") {
+            None => None,
+            Some(b) => Some(
+                b.as_str()
+                    .with_context(|| format!("checks[{i}].body: must be a string"))?
+                    .to_string(),
+            ),
+        };
+        checks.push(Check {
+            path: path.to_string(),
+            status,
+            body,
+        });
+    }
+    Ok(checks)
+}
+
+/// `pushit verify`: run HTTP checks against a deployed app and report.
+/// shortcut: probes carry no credentials, so authenticated app content needs
+/// --url on an unauthenticated endpoint; upgrade if verify must cross app auth.
+fn verify(server: &str, client: &Client, args: VerifyArgs) -> Result<()> {
+    let manifest = match fs::read_to_string(&args.manifest) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            return Err(anyhow::Error::new(e))
+                .with_context(|| format!("read {}", args.manifest.display()))
+        }
+        Ok(text) => Some(
+            serde_yaml::from_str::<serde_yaml::Value>(&text)
+                .with_context(|| format!("parse {}", args.manifest.display()))?,
+        ),
+    };
+    let app = match &args.app {
+        Some(a) => a.clone(),
+        None => manifest
+            .as_ref()
+            .and_then(|m| m.get("name"))
+            .and_then(|n| n.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                anyhow!(
+                    "app name required: pass it or point --manifest at a pushit.yaml with `name`"
+                )
+            })?,
+    };
+    let detail: serde_json::Value = serde_json::from_str(
+        &check(
+            client
+                .get(url(server, &format!("/api/apps/{app}")))
+                .send()?,
+        )?
+        .text()?,
+    )?;
+    let domain = detail
+        .get("domain")
+        .and_then(|d| d.as_str())
+        .ok_or_else(|| anyhow!("app detail: no `domain` field"))?
+        .to_string();
+    let revision = detail
+        .get("revisions")
+        .and_then(|r| r.as_array())
+        .and_then(|rs| {
+            rs.iter()
+                .find(|r| r.get("active").and_then(|a| a.as_bool()) == Some(true))
+        })
+        .and_then(|r| r.get("id"))
+        .and_then(|i| i.as_str())
+        .unwrap_or("?")
+        .to_string();
+
+    // Probes use a bare client: `--url` may point anywhere and component
+    // handlers are not the management token's audience — never leak it.
+    let probe = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let base = args.url.clone().unwrap_or_else(|| server.to_string());
+    let host_override = args.url.is_none();
+    let mut results = Vec::new();
+    let mut ok = true;
+    for c in parse_checks(manifest.as_ref())? {
+        let mut req = probe.get(format!("{base}{}", c.path));
+        if host_override {
+            req = req.header(reqwest::header::HOST, &domain);
+        }
+        let resp = req.send().with_context(|| format!("GET {}", c.path))?;
+        let status = resp.status().as_u16();
+        let body = resp.text().unwrap_or_default();
+        let mut errs = Vec::new();
+        match c.status {
+            Some(want) if want != status => {
+                errs.push(format!("expected status {want}"));
+            }
+            None if status >= 400 => {
+                errs.push("expected status < 400".into());
+            }
+            _ => {}
+        }
+        if let Some(needle) = &c.body {
+            if !body.contains(needle.as_str()) {
+                errs.push(format!("body does not contain {needle:?}"));
+            }
+        }
+        let check_ok = errs.is_empty();
+        ok &= check_ok;
+        results.push(serde_json::json!({
+            "path": c.path, "status": status, "ok": check_ok,
+            "error": if check_ok { serde_json::Value::Null } else { errs.join("; ").into() },
+        }));
+    }
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::json!({"app": app, "domain": domain, "revision": revision, "ok": ok, "checks": results})
+        );
+    } else {
+        println!("{domain} (revision {revision})");
+        for r in &results {
+            let path = r["path"].as_str().unwrap_or("?");
+            let status = r["status"].as_u64().unwrap_or(0);
+            match r["error"].as_str() {
+                Some(err) => println!("GET {path:<16} {status} fail ({err})"),
+                None => println!("GET {path:<16} {status} ok"),
+            }
+        }
+        let total = results.len();
+        let passed = results
+            .iter()
+            .filter(|r| r["ok"].as_bool() == Some(true))
+            .count();
+        println!("verify: {passed}/{total} checks passed");
+    }
+    if !ok {
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -1500,6 +1788,10 @@ secrets: []
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip1
   ui_dist: ui
+checks:
+  - path: /
+  - path: /_fn/hello
+    body: '"msg":"hello"'
 "#;
 
 const INIT_WIT: &str = r#"package pushit:{name};
@@ -1880,5 +2172,145 @@ mod owner_login_tests {
         assert!(local_server("http://hub.localhost:9100").is_ok());
         assert!(local_server("http://hub.platform.test:9100").is_err());
         assert!(Cli::try_parse_from(["pushit", "login", "--builtin", "--local"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod verify_logs_tests {
+    use super::*;
+
+    #[test]
+    fn since_durations() {
+        assert_eq!(parse_since("30s").unwrap(), 30);
+        assert_eq!(parse_since("10m").unwrap(), 600);
+        assert_eq!(parse_since("2h").unwrap(), 7200);
+        assert_eq!(parse_since("1d").unwrap(), 86400);
+        assert!(parse_since("10").is_err());
+        assert!(parse_since("m").is_err());
+        assert!(parse_since("5x").is_err());
+    }
+
+    #[test]
+    fn log_stamp_epoch() {
+        assert_eq!(
+            log_line_epoch("[d0 01:01:05] handler failed").unwrap(),
+            3665
+        );
+        assert_eq!(
+            log_line_epoch("[d20000 00:00:00] boot").unwrap(),
+            20000 * 86400
+        );
+        assert_eq!(log_line_epoch("no stamp"), None);
+        assert_eq!(log_line_epoch("[d1 00:00:00:0]"), None); // extra time field
+        assert_eq!(log_line_epoch("[x1 00:00:00]"), None); // not a d-stamp
+    }
+
+    #[test]
+    fn checks_default_and_parsed() {
+        let m: serde_yaml::Value = serde_yaml::from_str(
+            "name: a\nchecks:\n  - path: /_fn/hello\n    status: 200\n    body: '\"msg\":\"hello\"'\n  - path: /health\n",
+        )
+        .unwrap();
+        let cs = parse_checks(Some(&m)).unwrap();
+        assert_eq!(cs.len(), 2);
+        assert_eq!(cs[0].path, "/_fn/hello");
+        assert_eq!(cs[0].status, Some(200));
+        assert_eq!(cs[0].body.as_deref(), Some("\"msg\":\"hello\""));
+        assert_eq!(cs[1].status, None);
+
+        let no_checks: serde_yaml::Value = serde_yaml::from_str("name: a").unwrap();
+        let cs = parse_checks(Some(&no_checks)).unwrap();
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].path, "/");
+
+        let cs = parse_checks(None).unwrap();
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].path, "/");
+
+        let bad: serde_yaml::Value = serde_yaml::from_str("checks:\n  - status: 200\n").unwrap();
+        assert!(parse_checks(Some(&bad)).is_err());
+        let bad_path: serde_yaml::Value =
+            serde_yaml::from_str("checks:\n  - path: nope\n").unwrap();
+        assert!(parse_checks(Some(&bad_path)).is_err());
+    }
+
+    #[test]
+    fn checks_fail_closed_on_malformed_authored_values() {
+        let y = |s: &str| serde_yaml::from_str::<serde_yaml::Value>(s).unwrap();
+        // non-list checks
+        assert!(parse_checks(Some(&y("checks: yes"))).is_err());
+        // empty list would verify nothing
+        assert!(parse_checks(Some(&y("checks: []"))).is_err());
+        // mistyped status (string), and out-of-range status
+        assert!(parse_checks(Some(&y("checks:\n  - path: /\n    status: '200'"))).is_err());
+        assert!(parse_checks(Some(&y("checks:\n  - path: /\n    status: 99"))).is_err());
+        assert!(parse_checks(Some(&y("checks:\n  - path: /\n    status: 600"))).is_err());
+        // mistyped body (number)
+        assert!(parse_checks(Some(&y("checks:\n  - path: /\n    body: 42"))).is_err());
+    }
+
+    /// Regression: app probes must not carry the management Bearer token
+    /// (the client's default header) — not to overridden hosts, not to --url.
+    #[test]
+    fn verify_probes_carry_no_credentials() {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let base = format!("http://{addr}");
+        let detail = r#"{"name":"probe","domain":"probe.localhost","revisions":[{"id":"r1","active":true}]}"#;
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let cap = captured.clone();
+        let srv = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut conn, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let n = conn.read(&mut buf).unwrap();
+                let head = String::from_utf8_lossy(&buf[..n]).into_owned();
+                let is_detail = head.contains("GET /api/apps/");
+                cap.lock().push(head);
+                let body = if is_detail { detail } else { "" };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                conn.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+
+        let auth_client = client_for(&base, false, Some("secret-management-token".into()));
+        let manifest = std::env::temp_dir().join("pushit-verify-no-auth-leak-absent.yaml");
+        verify(
+            &base,
+            &auth_client,
+            VerifyArgs {
+                app: Some("probe".into()),
+                manifest,
+                url: None,
+                json: true,
+            },
+        )
+        .unwrap();
+        srv.join().unwrap();
+
+        let reqs = captured.lock();
+        assert_eq!(reqs.len(), 2);
+        assert!(reqs[0].contains("GET /api/apps/probe"));
+        assert!(reqs[0].to_ascii_lowercase().contains("authorization")); // detail uses the token
+        assert!(reqs[1].contains("GET / "));
+        assert!(reqs[1]
+            .to_ascii_lowercase()
+            .contains("host: probe.localhost"));
+        assert!(
+            !reqs[1].to_ascii_lowercase().contains("authorization"),
+            "probe request leaked credentials: {}",
+            reqs[1]
+        );
+        assert!(
+            !reqs[1].to_ascii_lowercase().contains("x-pushit-dev"),
+            "probe request leaked the dev header"
+        );
     }
 }

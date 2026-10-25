@@ -53,6 +53,12 @@ an existing owner. See [local setup](docs/standalone-local-auth.md) or the
 `GET /api/apps/{name}` → app detail + manifest + revision history
 `POST /api/apps/{name}/rollback` — body `{"revision":"<id>"}` (omit → previous revision)
 
+App detail includes `metrics: {"requests": N, "errors": N}`, also shown on the
+hub app page and by `pushit status`. Counters reset on controller restart,
+span revisions, and count app requests after authentication (static + function).
+Errors count function responses with HTTP status >= 500, including traps and
+timeouts; static responses and authentication failures are not errors here.
+
 ### Immutable app versions
 
 Version IDs are the existing opaque revision IDs, not Git SHAs. No migration or

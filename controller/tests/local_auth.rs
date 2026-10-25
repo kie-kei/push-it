@@ -67,6 +67,7 @@ impl Server {
             runtime: Runtime::new(Duration::from_secs(30)).unwrap(),
             logs: Arc::new(LogStore::new(cfg.logs_dir()).unwrap()),
             auth: Auth::try_new(cfg.clone()).unwrap(),
+            metrics: Default::default(),
             cfg,
         });
         for app in ["first", "second"] {

@@ -7,6 +7,7 @@ use pushit_controller::{
     config::Config,
     db::Db,
     logs::LogStore,
+    metrics::Metrics,
     runtime::Runtime,
     secrets::Secrets,
     server::{router, AppState},
@@ -35,6 +36,7 @@ fn state(dev: bool) -> (tempfile::TempDir, Arc<AppState>) {
         runtime: Runtime::new(Duration::from_secs(30)).unwrap(),
         logs: Arc::new(LogStore::new(cfg.logs_dir()).unwrap()),
         auth: Auth::new(cfg.clone()),
+        metrics: Metrics::default(),
         cfg,
     });
     (dir, state)
@@ -648,4 +650,58 @@ async fn in_flight_http_body_pins_only_its_version_and_cancel_releases_it() {
         state.db.active_revision("example").unwrap().unwrap().id,
         "r2"
     );
+}
+
+#[tokio::test]
+async fn traffic_counts_only_authenticated_app_requests_and_function_5xx() {
+    let (_dir, state) = state(true);
+    let artifact = state.cfg.apps_dir().join("example/r1");
+    std::fs::create_dir_all(artifact.join("dist")).unwrap();
+    std::fs::write(artifact.join("dist/index.html"), "hello").unwrap();
+    state
+        .db
+        .deploy_revision(
+            "example",
+            "r1",
+            artifact.to_str().unwrap(),
+            "example.localhost",
+            "name: example",
+        )
+        .unwrap();
+    let app = router(state.clone());
+    for (host, path, expected) in [
+        ("missing.localhost", "/", StatusCode::NOT_FOUND),
+        ("example.localhost", "/", StatusCode::OK),
+        // No component artifact: exercise the real failed-function path.
+        ("example.localhost", "/_fn/hello", StatusCode::BAD_GATEWAY),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, host)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/apps/example")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = to_bytes(response.into_body(), 65536).await.unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        detail["metrics"],
+        serde_json::json!({"requests": 2, "errors": 1})
+    );
+    assert_eq!(state.metrics.get("missing"), (0, 0));
 }

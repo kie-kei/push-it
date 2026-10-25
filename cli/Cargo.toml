@@ -20,4 +20,5 @@ hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 mime_guess = "2"
+parking_lot = "0.12"
 rpassword = "7"
