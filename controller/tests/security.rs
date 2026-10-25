@@ -213,7 +213,7 @@ async fn rollback_restores_manifest_routes_and_static_config_but_not_secret_valu
     use pushit_controller::manifest::Manifest;
     let (_dir, state) = state(true);
     let app = router(state.clone());
-    let manifest_a = "name: example\ndomain: old\nenv: {RELEASE: A}\nsecrets: [OLD_KEY]\ncapabilities:\n  http_out: []\n  sql: [db]\n  blobstore: [files]\nsql_bindings: {db: 'secret:OLD_KEY'}\n";
+    let manifest_a = "name: example\ndomain: old\nenv: {RELEASE: A}\nsecrets: [OLD_KEY]\ncapabilities:\n  http_out: ['*']\n  sql: [db]\n  blobstore: [files]\nsql_bindings: {db: 'secret:OLD_KEY'}\n";
     let manifest_b = "name: example\ndomain: new\nenv: {RELEASE: B}\nsecrets: [NEW_KEY]\ncapabilities:\n  sql: [analytics]\nsql_bindings: {analytics: 'platform:NEW_DB'}\n";
     for (id, domain, manifest) in [
         ("a", "old.localhost", manifest_a),
@@ -278,7 +278,10 @@ async fn rollback_restores_manifest_routes_and_static_config_but_not_secret_valu
     let restored = Manifest::parse(&snapshot.manifest).unwrap();
     assert_eq!(restored.env["RELEASE"], "A");
     assert_eq!(restored.secrets, ["OLD_KEY"]);
-    assert!(restored.http_out());
+    assert!(matches!(
+        restored.http_out_policy(),
+        pushit_controller::manifest::HttpOut::Allowed(_)
+    ));
     assert_eq!(restored.capabilities.sql, ["db"]);
     assert_eq!(restored.capabilities.blobstore, ["files"]);
     assert_eq!(restored.sql_bindings["db"], "secret:OLD_KEY");

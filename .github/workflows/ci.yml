@@ -75,6 +75,9 @@ jobs:
       - name: Production rejection and real WASM rollback smoke
         run: python3 scripts/security-e2e.py
 
+      - name: Outgoing-HTTP allowlist enforcement smoke
+        run: python3 scripts/http-out-e2e.py
+
       - name: Install HTTPS proxy test tools
         run: sudo apt-get update && sudo apt-get install -y nginx openssl
 

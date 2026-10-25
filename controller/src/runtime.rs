@@ -1,6 +1,7 @@
 use crate::blob_host::{self, BlobCtx};
 use crate::kv_host::{self, KvCtx};
 use crate::log_host::{self, LogCtx};
+use crate::manifest::HttpOut;
 use crate::sql_host::{self, SqlCtx};
 use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
@@ -25,7 +26,9 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 pub struct HostCaps {
     /// Optional controller artifact lease; standalone dev has no version deletion.
     pub artifact_pin: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
-    pub allow_http_out: bool,
+    /// Outgoing-HTTP policy: denied, or an allowlist checked per request
+    /// against the authority host (see `manifest::HostFilter`).
+    pub http_out: HttpOut,
     pub sql_allowed: Vec<String>,
     pub sql_dsns: HashMap<String, String>,
     pub kv_allowed: Vec<String>,
@@ -37,7 +40,7 @@ pub struct ComponentCtx {
     table: ResourceTable,
     wasi: WasiCtx,
     http: WasiHttpCtx,
-    allow_http_out: bool,
+    http_out: HttpOut,
     pub sql: SqlCtx,
     pub kv: KvCtx,
     pub blob: BlobCtx,
@@ -64,7 +67,15 @@ impl WasiHttpView for ComponentCtx {
         request: hyper::Request<HyperOutgoingBody>,
         config: wasmtime_wasi_http::types::OutgoingRequestConfig,
     ) -> wasmtime_wasi_http::HttpResult<HostFutureIncomingResponse> {
-        if !self.allow_http_out {
+        // The host sees the request URI before it is dispatched: deny
+        // everything, or check the authority host against the allowlist.
+        let allowed = match &self.http_out {
+            HttpOut::Denied => false,
+            HttpOut::Allowed(filter) => {
+                request.uri().host().is_some_and(|host| filter.allows(host))
+            }
+        };
+        if !allowed {
             return Err(
                 wasmtime_wasi_http::bindings::http::types::ErrorCode::HttpRequestDenied.into(),
             );
@@ -163,17 +174,18 @@ impl Runtime {
         let stdout = MemoryOutputPipe::new(1 << 20);
         let stderr = MemoryOutputPipe::new(1 << 20);
         let mut wb = WasiCtxBuilder::new();
+        let dns_allowed = !matches!(caps.http_out, HttpOut::Denied);
         wb.envs(&env)
             .stdout(stdout.clone())
             .stderr(stderr.clone())
-            .allow_ip_name_lookup(caps.allow_http_out);
+            .allow_ip_name_lookup(dns_allowed);
         let mut store = Store::new(
             &self.engine,
             ComponentCtx {
                 table: ResourceTable::new(),
                 wasi: wb.build(),
                 http: WasiHttpCtx::new(),
-                allow_http_out: caps.allow_http_out,
+                http_out: caps.http_out,
                 sql: SqlCtx {
                     dir: dir.to_path_buf(),
                     allowed: caps.sql_allowed,
