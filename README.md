@@ -4,13 +4,39 @@
 
 [Видение](VISION.md) · [Приоритеты и критерии готовности](ROADMAP.md) · [Архитектура](ARCHITECTURE.md) · [API](API.md).
 
-## Standalone platform
+## Standalone-платформа без Keycloak/Caddy
 
-Want the full controller, hub, app subdomains, versions and secrets without Keycloak/Caddy? Use explicit **local owner auth** on loopback. It is separate from `pushit dev` and does not disable authentication. See [local setup, CLI login and security boundaries](docs/standalone-local-auth.md).
+Standalone-режимы запускают **полный существующий контроллер**: хаб,
+поддомены приложений, деплои, версии, секреты и логи. Это не `pushit dev`
+и не отключение аутентификации; обязательных Keycloak и Caddy нет.
 
-For a fixed external HTTPS domain behind any same-host reverse proxy, use explicit
-**builtin owner auth**: [proxy contract and tested nginx setup](docs/standalone-proxy-auth.md).
-No embedded TLS or mandatory Keycloak/Caddy; the controller remains loopback HTTP.
+- **`PUSHIT_AUTH_MODE=local`** — один владелец, только локальный компьютер:
+  `PUSHIT_BASE_DOMAIN=localhost`, HTTP на числовом loopback `127.0.0.1` или `::1`
+  с ненулевым портом. Внешние домены и reverse proxy здесь не поддерживаются.
+  [Настройка владельца, CLI login и границы безопасности](docs/standalone-local-auth.md).
+- **`PUSHIT_AUTH_MODE=builtin`** — тот же владелец, внешний HTTPS-домен через
+  управляемый оператором reverse proxy **на том же хосте и в том же сетевом
+  пространстве имён**. Контроллер остаётся HTTP на `127.0.0.1` или `::1`;
+  публичный backend, отдельная ВМ и container bridge вне контракта.
+  `PUSHIT_EXTERNAL_ORIGIN=https://<PUSHIT_BASE_DOMAIN>[:port]` фиксирует
+  **базовый origin, не URL хаба**, без пути и завершающего `/` (для 443 порт
+  не указывается). Proxy сохраняет внешний `Host`, включая нестандартный порт;
+  `Forwarded`/`X-Forwarded-*` не определяют доверенный origin.
+  [Контракт proxy и проверенный пример nginx](docs/standalone-proxy-auth.md).
+
+Пароль вводится на хабе или в скрытом CLI prompt; для автоматизации есть
+`--password-stdin` из защищённого источника, не пароль в аргументах/URL.
+Cookie хаба и приложений host-only, не общие wildcard-cookie; в builtin это `Secure`, `HttpOnly`,
+`SameSite=Lax`, `__Host-` cookie. В local HTTP cookie не имеют `Secure`.
+Owner auth не требует `PUSHIT_SESSION_KEY` и не совмещается с dev/OIDC-настройками.
+TLS, DNS, сертификаты и эксплуатация proxy остаются ответственностью оператора;
+встроенного TLS/ACME нет. OIDC — отдельный Keycloak-специфичный путь, не обещание
+совместимости с любым OIDC-провайдером. Один владелец — полный администратор,
+не SSO, multi-user или RBAC.
+
+Проверки standalone охватывают протокол и nginx с реальным TLS на временных
+тестовых данных. Они **не подтверждают enforcement cookie-prefix в браузерном
+движке** и не являются production/security sign-off.
 
 ## Установка CLI
 
@@ -119,16 +145,30 @@ Dev-проверки не проверяют production OIDC/auth. `--server` с
 ### Аутентификация и профили
 
 ```bash
-pushit login    # один раз: браузер → Keycloak → долгоживущий токен (~1 год)
+pushit login              # автоопределение owner auth либо браузерный OIDC
+pushit login --local      # явно owner auth для http://hub.localhost:<port>
+pushit login --builtin    # явно owner auth для https://hub.<base-domain>[:port]
 ```
 
-Токен хранится в `~/.config/pushit/token` (0600) и используется автоматически;
-приоритет токена: `--token` > `PUSHIT_TOKEN` > непустой токен выбранного/активного
+Standalone login использует пароль владельца и выдаёт **30-дневный** API-токен;
+обычный `pushit login` проверяет `/auth/mode` на допустимом local/builtin hub URL
+и выбирает owner auth при соответствующем ответе сервера.
+OIDC login использует браузер → Keycloak и долгоживущий токен **примерно на год**,
+не refresh-токен. В standalone профиль должен указывать именно на хаб,
+не на базовый домен; пошаговые команды — в руководствах выше.
+
+Login сохраняет токен в явно выбранный (`--profile`/`PUSHIT_PROFILE`) или
+активный профиль в `~/.config/pushit/profiles.toml` (0600); только при отсутствии
+профиля используется legacy-файл `~/.config/pushit/token` (0600).
+Абсолютный `XDG_CONFIG_HOME` заменяет `~/.config`.
+Приоритет токена: `--token` > `PUSHIT_TOKEN` > непустой токен выбранного/активного
 профиля > сохранённый legacy-токен. `--dev` — отдельный флаг dev-заголовка,
 а не источник токена; он может отправляться одновременно с Bearer-токеном.
-На production не используйте `--dev`: укажите сервер и выполните login
-для нужного профиля.
-Ротация — повторный `pushit login`.
+Для аутентифицированного инстанса не используйте `--dev`: укажите сервер
+и выполните login для нужного профиля.
+Повторный login получает и сохраняет новый токен; в owner auth он **не отзывает**
+старые автоматически. Список ID/сроков и явный отзыв: `pushit auth tokens`
+и `pushit auth revoke <token-id>`.
 
 Несколько инстансов — профили (файл `~/.config/pushit/profiles.toml`, 0600):
 
@@ -207,7 +247,8 @@ redb, один файл на приложение `$PUSHIT_DATA/appdata/<app>/lo
 
 Перед обновлением существующей установки прочитайте
 [изменения авторизации, ключей сессий и rollback](docs/security-upgrade.md).
-Production теперь требует явно заданный надёжный `PUSHIT_SESSION_KEY`;
+OIDC-режим вне dev требует явно заданный надёжный `PUSHIT_SESSION_KEY`
+(local/builtin используют opaque credentials без этого ключа);
 исторические ревизии без сохранённого manifest нельзя безопасно откатывать.
 
 ### Кэш репозиториев корневого манифеста
