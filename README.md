@@ -94,16 +94,16 @@ pushit init myapp
 cd myapp
 pushit build && pushit --dev --server http://127.0.0.1:9100 deploy
 
-curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/ | grep -F '<h1>myapp</h1>'
-curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/_fn/hello | grep -Fx '{"msg":"hello"}'
+pushit --dev --server http://127.0.0.1:9100 verify myapp
 pushit --dev --server http://127.0.0.1:9100 status myapp
 pushit --dev --server http://127.0.0.1:9100 logs myapp
 ```
 
-Ожидается UI с заголовком `myapp`, ответ функции `{"msg":"hello"}` и активная
-ревизия в `status`. Scaffold не требует секретов (`secrets: []`). Для одного
-приложения `deploy` **не запускает сборку**: после изменений повторяйте
-`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`.
+Ожидается `verify: 2/2 checks passed` (UI `myapp` и функция `{"msg":"hello"}`;
+проверки берутся из `checks:` в созданном pushit.yaml) и активная ревизия в
+`status`. `pushit verify` возвращает ненулевой exit code, если любая проверка
+не прошла. Для одного приложения `deploy` **не запускает сборку**: после
+изменений повторяйте `pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`.
 Не считайте деплой успешным при ненулевом коде выхода или неуспешных проверках;
 проверьте вывод команды и логи, исправьте причину и повторите проверку.
 При ошибке доверия TLS при загрузке зависимостей не отключайте проверку
@@ -150,6 +150,32 @@ pushit dev --env KEY=value --dsn db='postgres://…' --http-out
 Тот же wasmtime-рантайм, что и на платформе (wasi:keyvalue/sql/blobstore/logging,
 `local` key-value store, таймауты). Секреты локально передаются через `--env`,
 DSN sql-подключений — через `--dsn имя=DSN`.
+
+
+### Проверка приложения и логи после деплоя
+
+```bash
+pushit verify myapp            # HTTP-проверки из `checks:` (нет — только GET /)
+pushit verify myapp --json     # машиночитаемый результат для агентов/CI
+pushit verify myapp --url https://myapp.apps.lan   # внешний домен вместо контроллера
+pushit logs myapp --grep error # подстрока
+pushit logs myapp --since 30m  # свежее 30 минут; единицы s/m/h/d
+```
+
+`checks:` в pushit.yaml — список `{path, status?, body?}` (status 100–599); без
+`status` проходящей считается любая оценка < 400 (редирект на логин доказывает,
+что приложение маршрутизируется), `body` — ожидаемая подстрока ответа.
+Невалидное значение `checks:` (не список, пустой список, нечисловой или
+внедиапазонный `status`, нестроковый `body`, нечитаемый манифест) — ошибка, а
+не молчаливое ослабление до `GET /`. `verify` обращается к адресу контроллера
+с заголовком `Host: <домен приложения>` или к `--url`; зонды не несут никаких
+кредов (Bearer-токен уходит только в management-API), ненулевой exit code —
+хотя бы одна проверка не прошла. Приложение за браузерной аутентификацией
+(production OIDC, standalone owner-режимы) зонд видит как редирект на логин:
+это доказывает маршрутизацию, но не контент; контент-проверка — `--url` на
+эндпоинте без аутентификации или браузер.
+Фильтры `--grep/--since` работают и с `-f`; `--since` сравнивает метку
+`[dД HH:MM:SS]` (UTC) в строках лога, строки без метки не отбрасываются.
 
 ## Структура
 

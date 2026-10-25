@@ -63,6 +63,7 @@ export RUSTUP_TOOLCHAIN=1.99.1
 pushit init myapp
 cd myapp
 pushit build && pushit --profile "$APP_PROFILE" deploy
+pushit --profile "$APP_PROFILE" verify myapp   # HTTP checks from `checks:`; nonzero exit = failure
 pushit --profile "$APP_PROFILE" status myapp
 pushit --profile "$APP_PROFILE" logs myapp
 ```
@@ -73,13 +74,18 @@ If no profile exists, first register the operator-provided server with
 `--dev`. Explicit `--server` changes only the destination, not the resolved token.
 
 Verify the deployed app over HTTP using the operator-confirmed app URL:
-open `/` and `/_fn/hello` in a browser authenticated to that app host. Expect a
-`myapp` heading and `{"msg":"hello"}`, then check status and logs. Production
-app routes require the browser session cookie: a CLI Bearer token authenticates
-management APIs, **not** app UI/function routes. Do not treat an unauthenticated
-curl redirect/login page as a successful app check. If using curl, use an
-authorized app-host session cookie jar and `curl -fsS -b <cookie-jar> <app-url>`
-(and `<app-url>/_fn/hello`); validate the expected body, not just the exit status.
+`pushit verify myapp` runs the `checks:` from pushit.yaml (scaffold: `/` and
+`/_fn/hello` with the expected body) against the controller with the app Host
+header, `--json` for machine-readable output. On an authenticated instance a
+CLI Bearer token authorizes management APIs, **not** app UI/function routes:
+a redirect (status < 400) then proves routing, not app content. For a content
+check in production, open `/` and `/_fn/hello` in a browser authenticated to
+that app host. Expect a `myapp` heading and `{"msg":"hello"}`, then check
+status and logs. Production app routes require the browser session cookie.
+Do not treat an unauthenticated redirect/login page as a successful content
+check. If using curl, use an authorized app-host session cookie jar and
+`curl -fsS -b <cookie-jar> <app-url>` (and `<app-url>/_fn/hello`); validate
+the expected body, not just the exit status.
 Never print or commit cookies. Report any auth/HTTP check still pending.
 
 A nonzero build, deploy, or verification exit is failure: diagnose the error,
@@ -127,14 +133,14 @@ export RUSTUP_TOOLCHAIN=1.99.1  # repository rustup override no longer applies
 pushit init myapp
 cd myapp
 pushit build && pushit --dev --server http://127.0.0.1:9100 deploy
-curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/ | grep -F '<h1>myapp</h1>'
-curl -fsS -H 'Host: myapp.localhost' http://127.0.0.1:9100/_fn/hello | grep -Fx '{"msg":"hello"}'
+pushit --dev --server http://127.0.0.1:9100 verify   # checks: from pushit.yaml; nonzero exit = failure
 pushit --dev --server http://127.0.0.1:9100 status myapp
 pushit --dev --server http://127.0.0.1:9100 logs myapp
 ```
 
-Verify the UI has a `myapp` heading, the function returns `{"msg":"hello"}`,
-and status shows the active revision. A nonzero build/deploy/check exit is a
+Verify `verify` reports all checks passed (UI `myapp` heading and function
+`{"msg":"hello"}` come from the scaffold `checks:`), and status shows the
+active revision. A nonzero build/deploy/check exit is a
 failure, not success: inspect the error and logs, fix the cause, then repeat the
 checks. Never report success based only on an attempted command. Stop the
 controller with Ctrl-C when done; temporary directories remain for inspection.
@@ -308,14 +314,14 @@ cleanup failures are logged and may leave unserved orphan artifact directories.
 ## Debugging a deployed app
 
 1. **Deploy-time failure** (400 from `pushit deploy`): read the error — it names the cause: bad manifest, missing secret, component missing `incoming-handler` export, wasm not a component.
-2. **Runtime failure**: `pushit logs -f myapp` in one shell, reproduce in another/browser. The log gets: component stdout/stderr, `wasi:logging` lines, `handler failed: …` (trap/panic), `handler timed out after 30s`, platform events (deploys, rollbacks).
+2. **Runtime failure**: `pushit logs -f myapp` in one shell (`--grep <substr>` / `--since 30m` to narrow), reproduce in another/browser. The log gets: component stdout/stderr, `wasi:logging` lines, `handler failed: …` (trap/panic), `handler timed out after 30s`, platform events (deploys, rollbacks).
 3. **Capability errors**: `connection 'x' not granted by capabilities.sql`, `no DSN for connection 'x'`, `bucket 'x' not granted by capabilities.kv` — grant missing in the manifest, or the deploy manifest's `sql:` binding points at a missing secret; fix the manifest/binding or set the secret (`pushit secret set` / `pushit secret global set`).
 4. **UI loads but `/_fn` 404/500**: check the handler actually matches the request path (it includes `/_fn` prefix) and the component didn't trap — `handler failed` in logs.
 5. **Rollback when broken**: `pushit rollback myapp` — instant revert to previous revision; investigate at leisure.
 
 ## Making changes to an existing app
 
-Edit code → verify with `pushit dev` (fast, local), then `pushit build && pushit --dev --server http://127.0.0.1:9100 deploy` when the change should land (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
+Edit code → verify with `pushit dev` (fast, local), then `pushit build && pushit --dev --server http://127.0.0.1:9100 deploy` followed by `pushit --dev --server http://127.0.0.1:9100 verify` when the change should land (rebuild + redeploy = new revision; previous revisions stay for rollback). Secrets and env changes also need a redeploy to take effect.
 
 ## Common failures and fixes
 

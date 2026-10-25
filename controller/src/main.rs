@@ -33,6 +33,7 @@ async fn main() -> anyhow::Result<()> {
         runtime,
         logs,
         auth,
+        metrics: Default::default(),
     });
 
     tracing::info!("pushit-controller listening on {}", cfg.bind);

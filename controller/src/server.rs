@@ -7,6 +7,7 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post, put};
 use axum::Router;
+use http_body_util::BodyExt;
 use http_body_util::Full;
 use hyper::body::Bytes;
 use serde::Deserialize;
@@ -19,9 +20,9 @@ use crate::config::Config;
 use crate::db::{App, Db, DeleteVersion, Revision};
 use crate::logs::LogStore;
 use crate::manifest::Manifest;
+use crate::metrics::Metrics;
 use crate::runtime::Runtime;
 use crate::secrets::Secrets;
-use http_body_util::BodyExt;
 
 pub struct AppState {
     pub cfg: Config,
@@ -30,6 +31,8 @@ pub struct AppState {
     pub runtime: Runtime,
     pub logs: Arc<LogStore>,
     pub auth: Auth,
+    /// Process-lifetime per-app traffic counters; reset on controller restart.
+    pub metrics: Metrics,
 }
 
 type S = Arc<AppState>;
@@ -149,10 +152,12 @@ async fn api_app_detail(
         return Err((StatusCode::NOT_FOUND, "no such app").into_response());
     };
     let revs = s.db.revisions(&name).map_err(err500)?;
+    let (requests, errors) = s.metrics.get(&name);
     Ok(axum::Json(serde_json::json!({
         "name": app.name, "domain": app.domain,
         "manifest": app.manifest, "created_at": app.created_at,
         "revisions": revs,
+        "metrics": {"requests": requests, "errors": errors},
     }))
     .into_response())
 }
@@ -809,6 +814,7 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
     let revs = s.db.revisions(name).unwrap_or_default();
     let logs = s.logs.tail(name, 100).unwrap_or_default();
     let secrets = s.db.secret_names(name).unwrap_or_default();
+    let (requests, errors) = s.metrics.get(name);
     HubApp {
         app: &app,
         port_suffix: local_port_suffix(s),
@@ -816,6 +822,8 @@ fn hub_app_page(s: &AppState, name: &str) -> Response {
         active: revs.iter().any(|r| r.active),
         logs,
         secrets,
+        requests,
+        errors,
     }
     .render()
     .map(|h| axum::response::Html(h).into_response())
@@ -831,9 +839,13 @@ async fn app_dispatch(s: &AppState, req: Request<Body>, host: &str, _prefix: &st
         Ok(u) => u,
         Err(r) => return r,
     };
+    s.metrics.hit(&app.name);
     if uri.path().starts_with("/_fn/") || uri.path() == "/_fn" {
         let artifacts = Arc::new(artifacts);
         let response = call_fn(s, &app, &rev, user, req, artifacts.clone()).await;
+        if response.status().as_u16() >= 500 {
+            s.metrics.err(&app.name);
+        }
         // Keep the pin through streaming response consumption, not merely until
         // the handler returns its headers. Preserve frames (including trailers).
         return pin_response(response, artifacts);
@@ -1064,6 +1076,8 @@ struct HubApp<'a> {
     active: bool,
     logs: Vec<String>,
     secrets: Vec<String>,
+    requests: u64,
+    errors: u64,
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ pub mod local_auth;
 pub mod log_host;
 pub mod logs;
 pub mod manifest;
+pub mod metrics;
 pub mod runtime;
 pub mod secrets;
 pub mod server;
