@@ -990,9 +990,9 @@ async fn call_fn(
     let caps = crate::runtime::HostCaps {
         artifact_pin: Some(artifact_pin),
         allow_http_out: manifest.http_out(),
-        data_dir: s.cfg.data_dir.clone(),
         sql_allowed,
         sql_dsns,
+        kv_allowed: manifest.capabilities.kv.clone(),
         blob_allowed: manifest.capabilities.blobstore.clone(),
         blob_stores,
         log: crate::log_host::LogCtx {

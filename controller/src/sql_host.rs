@@ -1,9 +1,8 @@
 //! `wasi:sql@0.2.0-draft` host functions.
 //!
 //! Components open a logical connection name (granted via
-//! `capabilities.sql` in pushit.yaml); the host resolves it to a real DSN:
-//! `local` → built-in app sqlite, anything else must be bound at deploy
-//! time (`sql_bindings`: `secret:<app-secret-key>` or
+//! `capabilities.sql` in pushit.yaml); the host resolves it to a real DSN
+//! bound at deploy time (`sql_bindings`: `secret:<app-secret-key>` or
 //! `platform:<global-secret-name>`). Credentials never reach the guest.
 //!
 //! Drivers:
@@ -89,27 +88,10 @@ fn pool_key(dir: &Path, name: &str, dsn: &str) -> PoolKey {
     )
 }
 
-fn local_dsn(data_dir: &Path, app: &str) -> Result<String> {
-    let db_dir = data_dir.join("appdata").join(app);
-    std::fs::create_dir_all(&db_dir).context("creating appdata directory")?;
-    let db_path = db_dir.join("local.db");
-    // Create on first use, but never truncate app data on reopen or rollback.
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&db_path)
-        .context("opening local.db")?;
-    Ok(format!("sqlite://{}", db_path.display()))
-}
-
 /// Everything a component invocation needs for wasi:sql.
 pub struct SqlCtx {
     /// Revision dir — scopes the shared pool cache.
     pub dir: PathBuf,
-    /// Data dir — for `local` database resolution.
-    pub data_dir: PathBuf,
-    /// App name — for `local` database resolution.
-    pub app_name: String,
     /// Names granted by the manifest (`capabilities.sql`).
     pub allowed: Vec<String>,
     /// connection name → dsn, resolved from deploy-time `sql_bindings`.
@@ -131,9 +113,8 @@ impl SqlCtx {
 }
 
 /// Resolve `capabilities.sql` grants into (allowed names, name → dsn).
-/// Grants: `local` (reserved, app-scoped sqlite) or plain logical names —
-/// each bound at deploy time (`sql_bindings`); `resolve` fetches the DSN
-/// for a logical name (None = unbound or source secret missing).
+/// Each grant is a logical name bound at deploy time (`sql_bindings`);
+/// `resolve` fetches the DSN (None = unbound or source secret missing).
 pub fn resolve_grants(
     grants: &[String],
     app: &str,
@@ -142,10 +123,6 @@ pub fn resolve_grants(
     let mut allowed = Vec::with_capacity(grants.len());
     let mut dsns = HashMap::new();
     for grant in grants {
-        if grant == "local" {
-            allowed.push(grant.clone());
-            continue;
-        }
         let dsn = resolve(grant).with_context(|| {
             format!("capabilities.sql: no DSN for connection '{grant}' of app '{app}' — check the deploy manifest's sql: binding and the underlying secret")
         })?;
@@ -459,38 +436,26 @@ impl ComponentCtx {
 
 impl bindings::wasi::sql::types::Host for ComponentCtx {}
 /// Resolve `name` against the manifest grant + secret-resolved DSNs.
-/// `local` is a reserved name: auto-resolves to `$PUSHIT_DATA/appdata/<app>/local.db`
-/// (app-scoped sqlite database, no secret needed).
 fn authorize<'m>(
     name: &str,
     allowed: &'m [String],
     dsns: &'m HashMap<String, String>,
-) -> Result<Option<&'m str>, String> {
+) -> Result<&'m str, String> {
     if !allowed.iter().any(|a| a == name) {
         return Err(format!(
             "connection '{name}' not granted by capabilities.sql"
         ));
     }
-    if name == "local" {
-        return Ok(None); // signal to use built-in local DSN
-    }
-    dsns.get(name).map(|s| Some(s.as_str())).ok_or_else(|| {
+    dsns.get(name).map(|s| s.as_str()).ok_or_else(|| {
         format!("connection '{name}' has no DSN — check the deploy manifest's sql: binding")
     })
 }
 
 impl bindings::wasi::sql::types::HostConnection for ComponentCtx {
     async fn open(&mut self, name: String) -> Result<Resource<SqlConn>, Resource<SqlError>> {
-        let dsn_opt = match authorize(&name, &self.sql.allowed, &self.sql.dsns) {
-            Ok(opt) => opt,
+        let dsn = match authorize(&name, &self.sql.allowed, &self.sql.dsns) {
+            Ok(dsn) => dsn.to_string(),
             Err(msg) => return Err(self.sql_err(msg)),
-        };
-        let dsn = match dsn_opt {
-            Some(d) => d.to_string(),
-            None => match local_dsn(&self.sql.data_dir, &self.sql.app_name) {
-                Ok(dsn) => dsn,
-                Err(e) => return Err(self.sql_err(format!("{e:#}"))),
-            },
         };
         let backend = match self.sql.backend(&name, &dsn).await {
             Ok(backend) => backend,
@@ -617,36 +582,17 @@ pub fn add_to_linker(linker: &mut wasmtime::component::Linker<ComponentCtx>) -> 
 mod tests {
     use super::*;
 
-    #[test]
-    fn reopening_local_database_preserves_rows() {
-        let dir = tempfile::tempdir().unwrap();
-        let dsn = local_dsn(dir.path(), "a").unwrap();
-        let db_path = dir.path().join("appdata/a/local.db");
-        let db = rusqlite::Connection::open(&db_path).unwrap();
-        db.execute_batch("CREATE TABLE data(value TEXT); INSERT INTO data VALUES('retained');")
-            .unwrap();
-        drop(db);
-        for _ in 0..3 {
-            assert_eq!(local_dsn(dir.path(), "a").unwrap(), dsn);
-        }
-        let db = rusqlite::Connection::open(&db_path).unwrap();
-        assert_eq!(
-            db.query_row("SELECT value FROM data", [], |r| r.get::<_, String>(0))
-                .unwrap(),
-            "retained"
-        );
-    }
-
     #[tokio::test]
     async fn rotated_dsn_uses_current_secret_on_cached_revision() {
         sqlx::any::install_default_drivers();
         let dir = tempfile::tempdir().unwrap();
-        let old_dsn = local_dsn(dir.path(), "old-secret-target").unwrap();
-        let new_dsn = local_dsn(dir.path(), "new-secret-target").unwrap();
+        let old_dsn = format!("sqlite://{}", dir.path().join("old.db").display());
+        let new_dsn = format!("sqlite://{}", dir.path().join("new.db").display());
+        for f in ["old.db", "new.db"] {
+            std::fs::File::create(dir.path().join(f)).unwrap();
+        }
         let ctx = SqlCtx {
             dir: dir.path().join("revision-a"),
-            data_dir: dir.path().to_path_buf(),
-            app_name: "a".into(),
             allowed: vec!["db".into()],
             dsns: HashMap::new(),
             pools: Arc::new(Mutex::new(HashMap::new())),
@@ -695,12 +641,12 @@ mod tests {
 
     #[test]
     fn resolve_grants_mixed() {
-        let grants = vec!["local".to_string(), "db".to_string()];
+        let grants = vec!["db".to_string(), "ch".to_string()];
         let (allowed, dsns) = resolve_grants(&grants, "myapp", |name| {
-            (name == "db").then(|| "postgres://u:p@h/db".to_string())
+            Some(format!("postgres://u:p@h/{name}"))
         })
         .unwrap();
-        assert_eq!(allowed, ["local", "db"]);
+        assert_eq!(allowed, ["db", "ch"]);
         assert_eq!(dsns["db"], "postgres://u:p@h/db");
     }
 
@@ -733,7 +679,7 @@ mod tests {
         let mut dsns = HashMap::new();
         dsns.insert("sl".to_string(), "sqlite:///tmp/x.db".to_string());
         assert_eq!(
-            authorize("sl", &allowed, &dsns).unwrap().unwrap(),
+            authorize("sl", &allowed, &dsns).unwrap(),
             "sqlite:///tmp/x.db"
         );
         // not granted
@@ -747,12 +693,6 @@ mod tests {
             .contains("has no DSN"));
         // granted but nothing configured at all
         assert!(authorize("sl", &allowed, &HashMap::new()).is_err());
-        // local is reserved: granted via manifest, resolves without a DSN
-        let allowed3 = vec!["local".to_string()];
-        assert_eq!(
-            authorize("local", &allowed3, &HashMap::new()).unwrap(),
-            None
-        );
     }
 
     #[test]

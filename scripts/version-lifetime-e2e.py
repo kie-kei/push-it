@@ -27,11 +27,14 @@ HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 # The ordinary example stays unchanged. Build a fixture from its checked-in
 # bindings/WIT and lockfile, adding only controlled guest lifetime test routes.
+# The gate needs a blocking external host call, so the fixture re-vendors
+# wasi:sql (the example itself dropped it together with the built-in sqlite).
 GUEST = r'''
         let wait_for_release = || {
-            let connection = Connection::open("gate").unwrap();
-            let statement = Statement::prepare("SELECT 1", &[]).unwrap();
-            readwrite::query(&connection, &statement).unwrap();
+            let connection = bindings::wasi::sql::types::Connection::open("gate").unwrap();
+            let statement = bindings::wasi::sql::types::Statement::prepare("SELECT 1", &[])
+                .unwrap();
+            bindings::wasi::sql::readwrite::query(&connection, &statement).unwrap();
         };
         if path == "/_fn/lifecycle-stream" {
             let response = OutgoingResponse::new(Fields::new());
@@ -86,14 +89,37 @@ def main():
         root = Path(tmp)
         fixture = root / "fixture"
         shutil.copytree(ROOT / "examples/hello/fn", fixture, ignore=shutil.ignore_patterns("target"))
+        sql_wit = fixture / "wit/deps/sql"
+        sql_wit.mkdir()
+        for name in ("types.wit", "readwrite.wit"):
+            shutil.copy(ROOT / "wit/sql" / name, sql_wit / name)
+        world = fixture / "wit/world.wit"
+        marker_world = "    import wasi:keyvalue/store@0.2.0-draft;\n"
+        assert world.read_text().count(marker_world) == 1
+        world.write_text(world.read_text().replace(
+            marker_world,
+            marker_world
+            + "    import wasi:sql/types@0.2.0-draft;\n"
+            + "    import wasi:sql/readwrite@0.2.0-draft;\n"))
+        toml = fixture / "Cargo.toml"
+        marker_toml = '"wasi:keyvalue" = { path = "wit/deps/keyvalue" }'
+        assert toml.read_text().count(marker_toml) == 1
+        toml.write_text(toml.read_text().replace(
+            marker_toml,
+            marker_toml + '\n"wasi:sql" = { path = "wit/deps/sql" }'))
         source = fixture / "src/lib.rs"
         marker = '        let path = path.split(\'?\').next().unwrap_or("/");\n'
         text = source.read_text()
         assert text.count(marker) == 1, "example handler changed; update fixture insertion point"
         source.write_text(text.replace(marker, marker + GUEST))
-        subprocess.run(["cargo", "build", "--manifest-path", str(fixture / "Cargo.toml"),
-                        "--release", "--target", "wasm32-wasip2", "--locked", "--offline"], check=True,
-                       env={**os.environ, "CARGO_TARGET_DIR": str(root / "target")}, timeout=180)
+        # cargo-component regenerates bindings.rs for the patched world.
+        # cwd=ROOT matters: CI pins the toolchain via a rustup override on the
+        # checkout dir, and building from /tmp would lose the wasm32 targets.
+        subprocess.run(["cargo", "component", "build", "--manifest-path",
+                        str(fixture / "Cargo.toml"), "--release",
+                        "--target", "wasm32-wasip2", "--locked", "--offline"],
+                       cwd=ROOT, check=True,
+                       env={**os.environ, "CARGO_TARGET_DIR": str(root / "target")}, timeout=300)
         smoke.WASM = root / "target/wasm32-wasip2/release/hello_fn.wasm"
         data = root / "data"
         data.mkdir()

@@ -1,4 +1,5 @@
 use crate::blob_host::{self, BlobCtx};
+use crate::kv_host::{self, KvCtx};
 use crate::log_host::{self, LogCtx};
 use crate::sql_host::{self, SqlCtx};
 use anyhow::{bail, Context, Result};
@@ -25,9 +26,9 @@ pub struct HostCaps {
     /// Optional controller artifact lease; standalone dev has no version deletion.
     pub artifact_pin: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
     pub allow_http_out: bool,
-    pub data_dir: PathBuf,
     pub sql_allowed: Vec<String>,
     pub sql_dsns: HashMap<String, String>,
+    pub kv_allowed: Vec<String>,
     pub blob_allowed: Vec<String>,
     pub blob_stores: HashMap<String, blob_host::BlobEntry>,
     pub log: LogCtx,
@@ -38,6 +39,7 @@ pub struct ComponentCtx {
     http: WasiHttpCtx,
     allow_http_out: bool,
     pub sql: SqlCtx,
+    pub kv: KvCtx,
     pub blob: BlobCtx,
     pub log: LogCtx,
 }
@@ -78,6 +80,8 @@ pub struct Runtime {
     engine: Engine,
     /// (revision-dir, connection-name, DSN digest) → backend pool.
     sql_pools: Arc<Mutex<HashMap<sql_host::PoolKey, Arc<sql_host::Backend>>>>,
+    /// app kv file path → open redb database (`kv_host::DbCache`).
+    kv_dbs: kv_host::DbCache,
     pre: Mutex<HashMap<PathBuf, Arc<ProxyPre<ComponentCtx>>>>,
     pub timeout: Duration,
 }
@@ -103,6 +107,7 @@ impl Runtime {
         Ok(Runtime {
             engine,
             sql_pools: Arc::new(Mutex::new(HashMap::new())),
+            kv_dbs: Arc::new(Mutex::new(HashMap::new())),
             pre: Mutex::new(HashMap::new()),
             timeout,
         })
@@ -122,6 +127,7 @@ impl Runtime {
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         sql_host::add_to_linker(&mut linker)?;
+        kv_host::add_to_linker(&mut linker)?;
         blob_host::add_to_linker(&mut linker)?;
         log_host::add_to_linker(&mut linker)?;
         let pre = linker
@@ -170,11 +176,15 @@ impl Runtime {
                 allow_http_out: caps.allow_http_out,
                 sql: SqlCtx {
                     dir: dir.to_path_buf(),
-                    data_dir: data_dir.to_path_buf(),
-                    app_name: app_name.to_string(),
                     allowed: caps.sql_allowed,
                     dsns: caps.sql_dsns,
                     pools: self.sql_pools.clone(),
+                },
+                kv: KvCtx {
+                    allowed: caps.kv_allowed,
+                    data_dir: data_dir.to_path_buf(),
+                    app_name: app_name.to_string(),
+                    dbs: self.kv_dbs.clone(),
                 },
                 blob: BlobCtx {
                     allowed: caps.blob_allowed,

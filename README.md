@@ -147,9 +147,9 @@ pushit dev            # в каталоге приложения: сборка +
 pushit dev --env KEY=value --dsn db='postgres://…' --http-out
 ```
 
-Тот же wasmtime-рантайм, что и на платформе (wasi:sql/blobstore/logging,
-`local` sqlite, таймауты). Секреты локально передаются через `--env`,
-DSN не-`local` подключений — через `--dsn имя=DSN`.
+Тот же wasmtime-рантайм, что и на платформе (wasi:keyvalue/sql/blobstore/logging,
+`local` key-value store, таймауты). Секреты локально передаются через `--env`,
+DSN sql-подключений — через `--dsn имя=DSN`.
 
 ## Структура
 
@@ -160,14 +160,19 @@ DSN не-`local` подключений — через `--dsn имя=DSN`.
 - `infra/` — docker-compose (Caddy + Keycloak), realm
 - `scripts/e2e.sh` — end-to-end проверка
 
-## SQL
+## Данные
 
-Компоненты могут импортировать `wasi:sql@0.2.0-draft` — SQL через хост-функции.
-Доступ: `capabilities.sql` в pushit.yaml (логические имена; `local` — встроенная
-sqlite приложения). Откуда DSN — решает деплоер в root-манифесте (`sql:`:
-`secret:<ключ>` — секрет приложения, `platform:<имя>` — общий платформенный
-секрет). Драйверы: postgres/mysql/sqlite через sqlx, ClickHouse через
-HTTP-эндпоинт. См. `docs/sql.md`.
+Встроенная БД приложения — NoSQL: `wasi:keyvalue@0.2.0-draft` (`store`), embedded
+redb, один файл на приложение `$PUSHIT_DATA/appdata/<app>/local.kv`. Доступ:
+`capabilities.kv: [local]`; значения — байты (JSON по конвенции), запросов нет —
+только ключи и пагинация `list-keys`. Данные переживают ревизии и rollback.
+См. `docs/kv.md`.
+
+Внешние БД: `wasi:sql@0.2.0-draft` — SQL через хост-функции. Доступ:
+`capabilities.sql` в pushit.yaml (логические имена). Откуда DSN — решает деплоер
+в root-манифесте (`sql:`: `secret:<ключ>` — секрет приложения,
+`platform:<имя>` — общий платформенный секрет). Драйверы: postgres/mysql/sqlite
+через sqlx, ClickHouse через HTTP-эндпоинт. См. `docs/sql.md`.
 Также `wasi:blobstore@0.2.0-draft` (opendal: s3/fs, `capabilities.blobstore` +
 `$PUSHIT_DATA/blobstores.yaml`, см. `docs/blobstore.md`) и
 `wasi:logging@0.1.0-draft` (структурный лог в per-app файл, `docs/logging.md`).

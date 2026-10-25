@@ -1,10 +1,10 @@
 //! `pushit dev` — standalone local runtime.
 //!
 //! Reuses the controller's wasmtime host (`pushit_controller::runtime`) so
-//! local behavior matches production: same wasi:sql/blobstore/logging/http
+//! local behavior matches production: same wasi:sql/keyvalue/blobstore/logging/http
 //! host functions, same timeout machinery. No OIDC, no revisions, no
 //! controller process — env comes from the manifest + `--env`, SQL DSNs
-//! for non-`local` connections from `--dsn`.
+//! for bound connections from `--dsn`.
 
 use crate::{find_wasm, manifest_path, run_build_steps};
 use anyhow::{bail, Context, Result};
@@ -35,7 +35,7 @@ pub struct DevArgs {
     /// Env var for the component: --env KEY=value (repeatable).
     #[arg(long = "env")]
     pub env: Vec<String>,
-    /// DSN for a non-`local` sql connection: --dsn name='postgres://…' (repeatable).
+    /// DSN for a sql connection: --dsn name='postgres://…' (repeatable).
     #[arg(long = "dsn")]
     pub dsn: Vec<String>,
     /// Allow outgoing HTTP (same as capabilities.http_out on the platform).
@@ -133,7 +133,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
         dsns.insert(k.to_string(), v.to_string());
     }
     for name in &manifest.capabilities.sql {
-        if name != "local" && !dsns.contains_key(name) {
+        if !dsns.contains_key(name) {
             println!("warn: sql connection '{name}' has no --dsn — opening it will fail");
         }
     }
@@ -161,6 +161,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
         let dsns = dsns.clone();
         let logs = logs.clone();
         let sql_allowed = manifest.capabilities.sql.clone();
+        let kv_allowed = manifest.capabilities.kv.clone();
         let blob_allowed = manifest.capabilities.blobstore.clone();
         let app_name = manifest.name.clone();
         let data_dir = data_dir.clone();
@@ -175,6 +176,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
                 let dsns = dsns.clone();
                 let logs = logs.clone();
                 let sql_allowed = sql_allowed.clone();
+                let kv_allowed = kv_allowed.clone();
                 let blob_allowed = blob_allowed.clone();
                 let app_name = app_name.clone();
                 let data_dir = data_dir.clone();
@@ -188,6 +190,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
                         env,
                         dsns,
                         sql_allowed,
+                        kv_allowed,
                         blob_allowed,
                         http_out,
                         logs,
@@ -213,6 +216,7 @@ async fn handle(
     env: Vec<(String, String)>,
     dsns: HashMap<String, String>,
     sql_allowed: Vec<String>,
+    kv_allowed: Vec<String>,
     blob_allowed: Vec<String>,
     http_out: bool,
     logs: Arc<LogStore>,
@@ -245,9 +249,9 @@ async fn handle(
         let caps = HostCaps {
             artifact_pin: None,
             allow_http_out: http_out,
-            data_dir: data_dir.to_path_buf(),
             sql_allowed,
             sql_dsns: dsns,
+            kv_allowed,
             blob_allowed,
             // re-read per request (cheap yaml), mirrors the controller
             blob_stores: pushit_controller::blob_host::load_blobstores(data_dir)

@@ -1,6 +1,6 @@
 ---
 name: pushit-app
-description: Build, deploy, and debug PushIt platform apps with the pushit CLI. Use whenever the user wants to create, build, deploy, update, roll back, or debug an app on PushIt — internal WASM-component apps with server functions (`/_fn/*`) plus a static UI, host capabilities (wasi:sql, wasi:blobstore, wasi:logging), and configured platform auth. Also use when the user asks about pushit.yaml, pushit deploy, app logs, app secrets, or "the internal platform" generally.
+description: Build, deploy, and debug PushIt platform apps with the pushit CLI. Use whenever the user wants to create, build, deploy, update, roll back, or debug an app on PushIt — internal WASM-component apps with server functions (`/_fn/*`) plus a static UI, host capabilities (wasi:keyvalue, wasi:sql, wasi:blobstore, wasi:logging), and configured platform auth. Also use when the user asks about pushit.yaml, pushit deploy, app logs, app secrets, or "the internal platform" generally.
 ---
 
 # PushIt app development with the `pushit` CLI
@@ -152,7 +152,7 @@ does not prevent sending an active production token: the temporary
 Use a dedicated terminal and close it before returning to normal profiles.
 Dev checks cannot validate production OIDC/auth.
 
-**Local iteration without a controller:** `pushit dev` runs the component on the *same* wasmtime host as the platform (wasi:sql/blobstore/logging, `local` sqlite, 30s timeout) at `http://127.0.0.1:9101` — `/_fn/*` goes to the component, everything else serves `ui_dist`. Secrets/env: `--env KEY=value`; DSNs for non-`local` sql connections: `--dsn name='postgres://…'`; outgoing HTTP: `--http-out`. Use it for fast function testing; deploy to a controller to test hub/revisions, and an authenticated non-dev instance to test auth.
+**Local iteration without a controller:** `pushit dev` runs the component on the *same* wasmtime host as the platform (wasi:keyvalue/sql/blobstore/logging, `local` key-value store, 30s timeout) at `http://127.0.0.1:9101` — `/_fn/*` goes to the component, everything else serves `ui_dist`. Secrets/env: `--env KEY=value`; DSNs for sql connections: `--dsn name='postgres://…'`; outgoing HTTP: `--http-out`. Use it for fast function testing; deploy to a controller to test hub/revisions, and an authenticated non-dev instance to test auth.
 
 ## Deploying multiple apps from one manifest (repos + one command)
 
@@ -206,7 +206,8 @@ secrets:                         # names only — values are set via `pushit sec
 capabilities:                    # what the component is allowed to import/use
   http_out: ["api.example.com"]  # presence grants outgoing HTTP (MVP: unrestricted)
   env: [API_TOKEN]
-  sql: [local]                   # 'local' = built-in per-app sqlite; other names are bound to secret sources at deploy (root manifest sql:)
+  kv: [local]                    # 'local' = built-in per-app key-value store (NoSQL)
+  sql: [db]                      # logical names, bound to secret sources at deploy (root manifest sql:)
   blobstore: [files]             # logical stores from blobstores.yaml
 build:
   fn: cd fn && cargo component build --release --target wasm32-wasip1
@@ -226,16 +227,18 @@ Rules that bite when violated:
 
 | Manifest | Guest imports | What it gives |
 |---|---|---|
-| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Grants: `local` (app-scoped sqlite at `$PUSHIT_DATA/appdata/<app>/local.db`, no config, data survives redeploys/rollbacks) or plain logical names bound at deploy time in the root manifest (`sql: {name: secret:<app-secret-key> \| platform:<global-secret-name>}`). Credentials never reach the component |
+| `capabilities.kv: [local]` | `wasi:keyvalue` `store.open("local")`, bucket `get`/`set`/`delete`/`exists`/`list-keys` | Built-in NoSQL store: app-scoped key-value database at `$PUSHIT_DATA/appdata/<app>/local.kv`, no config, data survives redeploys/rollbacks. Values are bytes — JSON documents by convention. No query language; scan keys or keep key-prefix conventions |
+| `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Names are logical and bound at deploy time in the root manifest (`sql: {name: secret:<app-secret-key> \| platform:<global-secret-name>}`). Credentials never reach the component. For the built-in store use `kv`, not sql |
 | `capabilities.blobstore: [name]` | `wasi:blobstore` `get-container`, `get-data`, `write-data`, `list-objects`… | Object storage via opendal (s3/fs). Streams objects — fine for large files |
 | (always available) | `wasi:logging` `log(level, ctx, msg)` | Structured lines into `pushit logs <app>` |
-| `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer sql/blobstore interfaces when they cover the service |
+| `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer kv/sql/blobstore interfaces when they cover the service |
 
 If a component imports an interface NOT granted in `capabilities`, the request fails — check the manifest first when a call errors with "not granted".
 
 ## Deep-dive references (read as needed)
 
-- [references/sql.md](references/sql.md) — `wasi:sql` full contract: connection/statement resources, drivers (postgres/mysql/sqlite/ClickHouse), flattened rows, `local` database, binding sources
+- [references/kv.md](references/kv.md) — `wasi:keyvalue` full contract: the built-in per-app NoSQL store, bucket semantics, pagination, key conventions for document data
+- [references/sql.md](references/sql.md) — `wasi:sql` full contract: connection/statement resources, drivers (postgres/mysql/sqlite/ClickHouse), flattened rows, binding sources
 - [references/blobstore.md](references/blobstore.md) — `wasi:blobstore` full contract: containers, object read/write, listing, cross-store copy/move
 - [references/logging.md](references/logging.md) — `wasi:logging` levels and where lines land
 
@@ -271,7 +274,7 @@ pushit dev --env KEY=value --dsn db='postgres://…' --http-out
 curl http://127.0.0.1:9101/_fn/hello                # exercise the function
 ```
 
-This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:sql/blobstore/logging), same `local` sqlite, same 30s timeout — local success is useful evidence, not a guarantee of a successful platform deployment (configuration, capabilities, secrets, auth, and routing can differ). Go to the controller (`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`) to verify the hub, revisions/rollback, or bound secrets; use an authenticated non-dev instance to verify production auth.
+This is the default way to develop and debug `/_fn/*` logic: same host functions (wasi:keyvalue/sql/blobstore/logging), same `local` key-value store, same 30s timeout — local success is useful evidence, not a guarantee of a successful platform deployment (configuration, capabilities, secrets, auth, and routing can differ). Go to the controller (`pushit build && pushit --dev --server http://127.0.0.1:9100 deploy`) to verify the hub, revisions/rollback, or bound secrets; use an authenticated non-dev instance to verify production auth.
 
 ## Managing immutable app versions
 
@@ -306,7 +309,7 @@ cleanup failures are logged and may leave unserved orphan artifact directories.
 
 1. **Deploy-time failure** (400 from `pushit deploy`): read the error — it names the cause: bad manifest, missing secret, component missing `incoming-handler` export, wasm not a component.
 2. **Runtime failure**: `pushit logs -f myapp` in one shell, reproduce in another/browser. The log gets: component stdout/stderr, `wasi:logging` lines, `handler failed: …` (trap/panic), `handler timed out after 30s`, platform events (deploys, rollbacks).
-3. **Capability errors**: `connection 'x' not granted by capabilities.sql`, `no DSN for connection 'x'` — grant missing in the manifest or the deploy manifest's `sql:` binding points at a missing secret; fix the manifest/binding or set the secret (`pushit secret set` / `pushit secret global set`).
+3. **Capability errors**: `connection 'x' not granted by capabilities.sql`, `no DSN for connection 'x'`, `bucket 'x' not granted by capabilities.kv` — grant missing in the manifest, or the deploy manifest's `sql:` binding points at a missing secret; fix the manifest/binding or set the secret (`pushit secret set` / `pushit secret global set`).
 4. **UI loads but `/_fn` 404/500**: check the handler actually matches the request path (it includes `/_fn` prefix) and the component didn't trap — `handler failed` in logs.
 5. **Rollback when broken**: `pushit rollback myapp` — instant revert to previous revision; investigate at leisure.
 

@@ -32,13 +32,14 @@ synthetic values through `pushit secret set`; deployment without it fails withou
 creating an app. A's provisioning does not unblock B. Secret names/values do not
 appear in browser config. The hello fixture does not consume this secret at
 runtime: this checks provisioning/isolation, not arbitrary secret integrations.
-The manifest grants only app-local `sql: [local]`, with no external SQL DSN,
-blobstore grant, external IdP or auth-group dependency. Domain mapping is
+The manifest grants only the built-in app-local `kv: [local]`, with no external
+SQL DSN, blobstore grant, external IdP or auth-group dependency. Domain mapping is
 instance configuration, so the same manifest routes to different hostnames.
 
-SQL requests create fresh independent fixture data: A has two rows and B one.
-The script reads only its own temporary SQLite files with stdlib `sqlite3`, since
-the hello SQL response currently is not valid JSON. It copies **no** app DB,
+KV requests create per-instance stores in each instance's own data dir. The
+script checks only file presence and HTTP success — it never copies or migrates
+app-local state, and deliberately does not parse the store (no redb reader in
+the harness). It copies **no** app DB,
 controller DB, encryption key or data directory; separate encryption keys are
 also checked. Everything is stopped and removed on exit.
 

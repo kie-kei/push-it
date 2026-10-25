@@ -34,12 +34,15 @@ pub struct Capabilities {
     pub http_out: Option<Vec<String>>,
     #[serde(default)]
     pub env: Vec<String>,
-    /// Logical connection names this component may open via wasi:sql.
-    /// `local` is reserved for the app-scoped sqlite database
-    /// (`$PUSHIT_DATA/appdata/<app>/local.db`); other names are bound to a
-    /// DSN source at deploy time (`sql_bindings`).
+    /// Logical connection names this component may open via wasi:sql,
+    /// bound to a DSN source at deploy time (`sql_bindings`).
     #[serde(default)]
     pub sql: Vec<String>,
+    /// Logical bucket names this component may open via wasi:keyvalue.
+    /// `local` is reserved for the app-scoped embedded store
+    /// (`$PUSHIT_DATA/appdata/<app>/local.kv`); no other names exist yet.
+    #[serde(default)]
+    pub kv: Vec<String>,
     /// Logical blobstore names this component may open via wasi:blobstore.
     /// Names must exist in `$PUSHIT_DATA/blobstores.yaml`.
     #[serde(default)]

@@ -2,6 +2,7 @@ pub mod auth;
 pub mod blob_host;
 pub mod config;
 pub mod db;
+pub mod kv_host;
 pub mod local_auth;
 pub mod log_host;
 pub mod logs;

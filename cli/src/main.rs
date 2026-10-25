@@ -1116,6 +1116,10 @@ const SKILL_REFERENCES: &[(&str, &str)] = &[
         include_str!("../../skills/pushit-app/references/sql.md"),
     ),
     (
+        "kv.md",
+        include_str!("../../skills/pushit-app/references/kv.md"),
+    ),
+    (
         "blobstore.md",
         include_str!("../../skills/pushit-app/references/blobstore.md"),
     ),
