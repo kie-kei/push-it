@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path
 import socket
-import sqlite3
 import subprocess
 import tempfile
 import time
@@ -20,7 +19,7 @@ CLI = ROOT / "target/debug/pushit"
 WASM = ROOT / "examples/hello/fn/target/wasm32-wasip2/release/hello_fn.wasm"
 SECRET = "PORTABILITY_TEST_SECRET"
 MANIFEST = ("name: hello\ndomain: portable\nenv:\n  GREETING: portable-hello\n"
-            f"secrets: [{SECRET}]\ncapabilities:\n  sql: [local]\n").encode()
+            f"secrets: [{SECRET}]\ncapabilities:\n  kv: [local]\n").encode()
 UI = b"<!doctype html><title>portable fixture</title><script src='/config.js'></script>\n"
 # Ignore ambient proxies too: every request must stay on loopback.
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -94,11 +93,9 @@ class Instance:
         if self.log is not None:
             self.log.close()
 
-    def rows(self):
-        db = self.data / "appdata/hello/local.db"
-        # Read only our temporary fixture DB; never copy/migrate it.
-        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
-            return conn.execute("SELECT id, msg FROM hello ORDER BY id").fetchall()
+    def kv_file(self):
+        # App-scoped kv store; read-only sanity, never copied or migrated.
+        return self.data / "appdata/hello/local.kv"
 
 
 def main():
@@ -151,17 +148,15 @@ def main():
                 assert instance.request("/_fn/env", instance.host) == (200, b'{"GREETING":"portable-hello"}')
                 assert instance.request("/", other.host)[0] == 404
                 assert instance.request("/_fn/hello", other.host)[0] == 404
-                assert not (instance.data / "appdata/hello/local.db").exists()
-                assert instance.request("/_fn/sql", instance.host)[0] == 200
-            assert a.rows() == b.rows() == [(1, "hello from sql")]
-            assert a.request("/_fn/sql", a.host)[0] == 200
-            assert a.rows() == [(1, "hello from sql"), (2, "hello from sql")]
-            assert b.rows() == [(1, "hello from sql")]
+                assert not instance.kv_file().exists()
+                assert instance.request("/_fn/kv", instance.host)[0] == 200
+            assert a.kv_file().is_file() and b.kv_file().is_file()
+            assert a.request("/_fn/kv", a.host)[0] == 200
             assert (a.data / "age.key").read_bytes() != (b.data / "age.key").read_bytes()
             a.stop()
             assert b.request("/_fn/hello", b.host)[0] == 200
             assert b.request("/config.js", b.host) == (200, expected_config)
-            assert b.rows() == [(1, "hello from sql")]
+            assert b.kv_file().is_file()
             assert all(digest(p) == sha for p, sha in hashes.items())
         finally:
             a.stop()

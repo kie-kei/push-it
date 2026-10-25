@@ -58,7 +58,7 @@ fi
 
 echo "==> write blobstores.yaml"
 mkdir -p "$PUSHIT_DATA"
-# local database is built-in at $PUSHIT_DATA/appdata/<app>/local.db
+# local kv store is built-in at $PUSHIT_DATA/appdata/<app>/local.kv
 printf 'files: fs://%s/blobs\n' "$PUSHIT_DATA" >"$PUSHIT_DATA/blobstores.yaml"
 
 echo "==> start controller"
@@ -113,11 +113,11 @@ else
   fail "fn hello returned JSON"
 fi
 
-echo "==> GET /_fn/sql (wasi:sql via sqlite)"
-if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/sql" | grep -q 'hello from sql'; then
-  pass "fn sql returned inserted row"
+echo "==> GET /_fn/kv (wasi:keyvalue via redb)"
+if curl -sf -H "Host: $APP_HOST" "$SERVER/_fn/kv" | grep -q 'hello from kv'; then
+  pass "fn kv round-tripped the store"
 else
-  fail "fn sql returned inserted row"
+  fail "fn kv round-tripped the store"
 fi
 
 echo "==> GET /_fn/log (wasi:logging)"

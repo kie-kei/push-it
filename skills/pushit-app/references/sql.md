@@ -5,12 +5,12 @@
 Components can query databases through host functions instead of raw
 sockets. The guest imports `wasi:sql@0.2.0-draft` (`types` + `readwrite`);
 the controller resolves *logical* connection names to real databases.
-For non-`local` connections, DSNs live in encrypted app-private or
-platform-wide secrets. The deployer binds logical names to secret sources
-(`secret:<app-secret-key>` or `platform:<global-secret-name>`); manifests
-contain source references, not credential values. The SQL host resolves
-these secrets and connects on behalf of the component without exposing
-the DSN to it. The reserved `local` connection needs no DSN secret.
+DSNs live in encrypted app-private or platform-wide secrets. The deployer
+binds logical names to secret sources (`secret:<app-secret-key>` or
+`platform:<global-secret-name>`); manifests contain source references,
+not credential values. The SQL host resolves these secrets and connects
+on behalf of the component without exposing the DSN to it. For the
+built-in NoSQL store see [kv.md](kv.md).
 
 ## Contract
 
@@ -52,13 +52,10 @@ where the credentials live:
 
 ```yaml
 capabilities:
-  sql: [local, db]   # 'local' = built-in per-app sqlite
+  sql: [db]   # logical names, bound at deploy time
 ```
 
-`local` — reserved name: app-scoped sqlite at
-`$PUSHIT_DATA/appdata/<app>/local.db`, no configuration needed.
-
-Every other name must be **bound at deploy time** by the deployer (root
+Every name must be **bound at deploy time** by the deployer (root
 manifest) to a secret source — the app repo never decides the scope:
 
 ```yaml
@@ -131,7 +128,8 @@ resource; `error.trace()` yields the message. Connections failed at
 
 ## Example
 
-`examples/hello` declares `capabilities.sql: [local]`; its `/_fn/sql`
-route opens `connection.open("local")`, creates a table, inserts a row,
-and selects it back over the app-scoped sqlite database. No SQL binding
-or DSN secret is needed for `local`.
+Any app that declares `capabilities.sql: [db]` (with the deploy-side
+binding above) can run the round trip from `examples/hello/fn` history:
+`connection.open("db")`, `statement.prepare`, `exec`, `query`. For a
+working checkout that needs no external database, see the `/_fn/kv`
+route in `examples/hello` ([kv.md](kv.md)) — the built-in store.

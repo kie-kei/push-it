@@ -17,7 +17,7 @@ package = "pushit:hello-fn"
 "wasi:cli" = { path = "wit/deps/cli" }
 "wasi:io" = { path = "wit/deps/io" }
 "wasi:clocks" = { path = "wit/deps/clocks" }
-"wasi:sql" = { path = "wit/deps/sql" }
+"wasi:keyvalue" = { path = "wit/deps/keyvalue" }
 "wasi:logging" = { path = "wit/deps/logging" }
 "wasi:blobstore" = { path = "wit/deps/blobstore" }
 

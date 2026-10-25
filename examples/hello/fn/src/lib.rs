@@ -7,9 +7,8 @@ use bindings::wasi::blobstore::types::{IncomingValue, OutgoingValue};
 use bindings::wasi::http::types::{
     Fields, IncomingRequest, OutgoingBody, OutgoingResponse, ResponseOutparam,
 };
+use bindings::wasi::keyvalue::store::{self, Bucket};
 use bindings::wasi::logging::logging::{self, Level};
-use bindings::wasi::sql::readwrite;
-use bindings::wasi::sql::types::{Connection, DataType, Error, Statement};
 
 struct Component;
 
@@ -50,7 +49,7 @@ impl Guest for Component {
                 let v = std::env::var("GREETING").unwrap_or_default();
                 (200, format!("{{\"GREETING\":\"{v}\"}}"))
             }
-            "/_fn/sql" => match sql_roundtrip() {
+            "/_fn/kv" => match kv_roundtrip() {
                 Ok(s) => (200, s),
                 Err(e) => (500, format!("{{\"error\":{e:?}}}")),
             },
@@ -78,41 +77,20 @@ impl Guest for Component {
     }
 }
 
-fn sql_roundtrip() -> Result<String, String> {
-    let conn = Connection::open("local").map_err(trace)?;
-    let ddl = Statement::prepare(
-        "CREATE TABLE IF NOT EXISTS hello (id INTEGER PRIMARY KEY, msg TEXT)",
-        &[],
-    )
-    .map_err(trace)?;
-    readwrite::exec(&conn, &ddl).map_err(trace)?;
-    let ins = Statement::prepare(
-        "INSERT INTO hello (msg) VALUES (?)",
-        &["hello from sql".to_string()],
-    )
-    .map_err(trace)?;
-    readwrite::exec(&conn, &ins).map_err(trace)?;
-    let sel = Statement::prepare("SELECT id, msg FROM hello ORDER BY id", &[]).map_err(trace)?;
-    let rows = readwrite::query(&conn, &sel).map_err(trace)?;
-    // rows arrive flattened: one record per column
-    let mut fields = Vec::new();
-    for r in &rows {
-        let v = match &r.value {
-            DataType::Null => "null".to_string(),
-            DataType::Boolean(b) => b.to_string(),
-            DataType::Int32(i) => i.to_string(),
-            DataType::Int64(i) => i.to_string(),
-            DataType::Uint32(u) => u.to_string(),
-            DataType::Uint64(u) => u.to_string(),
-            DataType::Float(f) | DataType::Double(f) => f.to_string(),
-            DataType::Str(s) | DataType::Date(s) | DataType::Time(s) | DataType::Timestamp(s) => {
-                format!("{s:?}")
-            }
-            DataType::Binary(b) => format!("{b:?}"),
-        };
-        fields.push(format!("{:?}:{v}", r.field_name));
-    }
-    Ok(format!("{{\"rows\":[{}]}}", fields.join(",")))
+fn kv_roundtrip() -> Result<String, String> {
+    let kv = |e: bindings::wasi::keyvalue::store::Error| format!("{e:?}");
+    let bucket: Bucket = store::open("local").map_err(kv)?;
+    bucket.set("greeting", b"hello from kv").map_err(kv)?;
+    let value = bucket.get("greeting").map_err(kv)?.unwrap_or_default();
+    let keys = bucket.list_keys(None).map_err(kv)?.keys;
+    bucket.delete("greeting").map_err(kv)?;
+    let gone = bucket.exists("greeting").map_err(kv)?;
+    Ok(format!(
+        "{{\"value\":{:?},\"keys\":{:?},\"deleted\":{}}}",
+        String::from_utf8_lossy(&value),
+        keys,
+        !gone
+    ))
 }
 
 fn blob_roundtrip() -> Result<String, String> {
@@ -188,9 +166,6 @@ fn write_chunk(s: &bindings::wasi::io::streams::OutputStream, mut b: &[u8]) -> R
         b = &b[n..];
     }
     Ok(())
-}
-fn trace(e: Error) -> String {
-    e.trace()
 }
 
 bindings::export!(Component with_types_in bindings);

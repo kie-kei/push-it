@@ -9995,6 +9995,795 @@ pub mod wasi {
             }
         }
     }
+    pub mod keyvalue {
+        /// A keyvalue interface that provides eventually consistent key-value operations.
+        ///
+        /// Each of these operations acts on a single key-value pair.
+        ///
+        /// The value in the key-value pair is defined as a `u8` byte array and the intention is that it is
+        /// the common denominator for all data types defined by different key-value stores to handle data,
+        /// ensuring compatibility between different key-value stores. Note: the clients will be expecting
+        /// serialization/deserialization overhead to be handled by the key-value store. The value could be
+        /// a serialized object from JSON, HTML or vendor-specific data types like AWS S3 objects.
+        ///
+        /// Data consistency in a key value store refers to the guarantee that once a write operation
+        /// completes, all subsequent read operations will return the value that was written.
+        ///
+        /// Any implementation of this interface must have enough consistency to guarantee "reading your
+        /// writes." In particular, this means that the client should never get a value that is older than
+        /// the one it wrote, but it MAY get a newer value if one was written around the same time. These
+        /// guarantees only apply to the same client (which will likely be provided by the host or an
+        /// external capability of some kind). In this context a "client" is referring to the caller or
+        /// guest that is consuming this interface. Once a write request is committed by a specific client,
+        /// all subsequent read requests by the same client will reflect that write or any subsequent
+        /// writes. Another client running in a different context may or may not immediately see the result
+        /// due to the replication lag. As an example of all of this, if a value at a given key is A, and
+        /// the client writes B, then immediately reads, it should get B. If something else writes C in
+        /// quick succession, then the client may get C. However, a client running in a separate context may
+        /// still see A or B
+        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
+        pub mod store {
+            #[used]
+            #[doc(hidden)]
+            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
+            use super::super::super::_rt;
+            /// The set of errors which may be raised by functions in this package
+            #[derive(Clone)]
+            pub enum Error {
+                /// The host does not recognize the store identifier requested.
+                NoSuchStore,
+                /// The requesting component does not have access to the specified store
+                /// (which may or may not exist).
+                AccessDenied,
+                /// Some implementation-specific error has occurred (e.g. I/O)
+                Other(_rt::String),
+            }
+            impl ::core::fmt::Debug for Error {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    match self {
+                        Error::NoSuchStore => {
+                            f.debug_tuple("Error::NoSuchStore").finish()
+                        }
+                        Error::AccessDenied => {
+                            f.debug_tuple("Error::AccessDenied").finish()
+                        }
+                        Error::Other(e) => {
+                            f.debug_tuple("Error::Other").field(e).finish()
+                        }
+                    }
+                }
+            }
+            impl ::core::fmt::Display for Error {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    write!(f, "{:?}", self)
+                }
+            }
+            impl std::error::Error for Error {}
+            /// A response to a `list-keys` operation.
+            #[derive(Clone)]
+            pub struct KeyResponse {
+                /// The list of keys returned by the query.
+                pub keys: _rt::Vec<_rt::String>,
+                /// The continuation token to use to fetch the next page of keys. If this is `null`, then
+                /// there are no more keys to fetch.
+                pub cursor: Option<u64>,
+            }
+            impl ::core::fmt::Debug for KeyResponse {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("KeyResponse")
+                        .field("keys", &self.keys)
+                        .field("cursor", &self.cursor)
+                        .finish()
+                }
+            }
+            /// A bucket is a collection of key-value pairs. Each key-value pair is stored as a entry in the
+            /// bucket, and the bucket itself acts as a collection of all these entries.
+            ///
+            /// It is worth noting that the exact terminology for bucket in key-value stores can very
+            /// depending on the specific implementation. For example:
+            ///
+            /// 1. Amazon DynamoDB calls a collection of key-value pairs a table
+            /// 2. Redis has hashes, sets, and sorted sets as different types of collections
+            /// 3. Cassandra calls a collection of key-value pairs a column family
+            /// 4. MongoDB calls a collection of key-value pairs a collection
+            /// 5. Riak calls a collection of key-value pairs a bucket
+            /// 6. Memcached calls a collection of key-value pairs a slab
+            /// 7. Azure Cosmos DB calls a collection of key-value pairs a container
+            ///
+            /// In this interface, we use the term `bucket` to refer to a collection of key-value pairs
+            #[derive(Debug)]
+            #[repr(transparent)]
+            pub struct Bucket {
+                handle: _rt::Resource<Bucket>,
+            }
+            impl Bucket {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for Bucket {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]bucket"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
+                }
+            }
+            #[allow(unused_unsafe, clippy::all)]
+            /// Get the bucket with the specified identifier.
+            ///
+            /// `identifier` must refer to a bucket provided by the host.
+            ///
+            /// `error::no-such-store` will be raised if the `identifier` is not recognized.
+            pub fn open(identifier: &str) -> Result<Bucket, Error> {
+                unsafe {
+                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                    struct RetArea(
+                        [::core::mem::MaybeUninit<
+                            u8,
+                        >; 4 * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let mut ret_area = RetArea(
+                        [::core::mem::MaybeUninit::uninit(); 4
+                            * ::core::mem::size_of::<*const u8>()],
+                    );
+                    let vec0 = identifier;
+                    let ptr0 = vec0.as_ptr().cast::<u8>();
+                    let len0 = vec0.len();
+                    let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                    #[cfg(target_arch = "wasm32")]
+                    #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                    unsafe extern "C" {
+                        #[link_name = "open"]
+                        fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unsafe extern "C" fn wit_import2(_: *mut u8, _: usize, _: *mut u8) {
+                        unreachable!()
+                    }
+                    unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
+                    let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                    let result10 = match l3 {
+                        0 => {
+                            let e = {
+                                let l4 = *ptr1
+                                    .add(::core::mem::size_of::<*const u8>())
+                                    .cast::<i32>();
+                                unsafe { Bucket::from_handle(l4 as u32) }
+                            };
+                            Ok(e)
+                        }
+                        1 => {
+                            let e = {
+                                let l5 = i32::from(
+                                    *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                );
+                                let v9 = match l5 {
+                                    0 => Error::NoSuchStore,
+                                    1 => Error::AccessDenied,
+                                    n => {
+                                        debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                        let e9 = {
+                                            let l6 = *ptr1
+                                                .add(2 * ::core::mem::size_of::<*const u8>())
+                                                .cast::<*mut u8>();
+                                            let l7 = *ptr1
+                                                .add(3 * ::core::mem::size_of::<*const u8>())
+                                                .cast::<usize>();
+                                            let len8 = l7;
+                                            let bytes8 = _rt::Vec::from_raw_parts(
+                                                l6.cast(),
+                                                len8,
+                                                len8,
+                                            );
+                                            _rt::string_lift(bytes8)
+                                        };
+                                        Error::Other(e9)
+                                    }
+                                };
+                                v9
+                            };
+                            Err(e)
+                        }
+                        _ => _rt::invalid_enum_discriminant(),
+                    };
+                    result10
+                }
+            }
+            impl Bucket {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Get the value associated with the specified `key`
+                ///
+                /// The value is returned as an option. If the key-value pair exists in the
+                /// store, it returns `Ok(value)`. If the key does not exist in the
+                /// store, it returns `Ok(none)`.
+                ///
+                /// If any other error occurs, it returns an `Err(error)`.
+                pub fn get(&self, key: &str) -> Result<Option<_rt::Vec<u8>>, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 4
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = key;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]bucket.get"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result13 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    match l4 {
+                                        0 => None,
+                                        1 => {
+                                            let e = {
+                                                let l5 = *ptr1
+                                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l6 = *ptr1
+                                                    .add(3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len7 = l6;
+                                                _rt::Vec::from_raw_parts(l5.cast(), len7, len7)
+                                            };
+                                            Some(e)
+                                        }
+                                        _ => _rt::invalid_enum_discriminant(),
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l8 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    let v12 = match l8 {
+                                        0 => Error::NoSuchStore,
+                                        1 => Error::AccessDenied,
+                                        n => {
+                                            debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                            let e12 = {
+                                                let l9 = *ptr1
+                                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l10 = *ptr1
+                                                    .add(3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len11 = l10;
+                                                let bytes11 = _rt::Vec::from_raw_parts(
+                                                    l9.cast(),
+                                                    len11,
+                                                    len11,
+                                                );
+                                                _rt::string_lift(bytes11)
+                                            };
+                                            Error::Other(e12)
+                                        }
+                                    };
+                                    v12
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result13
+                    }
+                }
+            }
+            impl Bucket {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Set the value associated with the key in the store. If the key already
+                /// exists in the store, it overwrites the value.
+                ///
+                /// If the key does not exist in the store, it creates a new key-value pair.
+                ///
+                /// If any other error occurs, it returns an `Err(error)`.
+                pub fn set(&self, key: &str, value: &[u8]) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 4
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = key;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let vec1 = value;
+                        let ptr1 = vec1.as_ptr().cast::<u8>();
+                        let len1 = vec1.len();
+                        let ptr2 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]bucket.set"]
+                            fn wit_import3(
+                                _: i32,
+                                _: *mut u8,
+                                _: usize,
+                                _: *mut u8,
+                                _: usize,
+                                _: *mut u8,
+                            );
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import3(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import3(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1.cast_mut(),
+                                len1,
+                                ptr2,
+                            )
+                        };
+                        let l4 = i32::from(*ptr2.add(0).cast::<u8>());
+                        let result10 = match l4 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = i32::from(
+                                        *ptr2.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    let v9 = match l5 {
+                                        0 => Error::NoSuchStore,
+                                        1 => Error::AccessDenied,
+                                        n => {
+                                            debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                            let e9 = {
+                                                let l6 = *ptr2
+                                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l7 = *ptr2
+                                                    .add(3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len8 = l7;
+                                                let bytes8 = _rt::Vec::from_raw_parts(
+                                                    l6.cast(),
+                                                    len8,
+                                                    len8,
+                                                );
+                                                _rt::string_lift(bytes8)
+                                            };
+                                            Error::Other(e9)
+                                        }
+                                    };
+                                    v9
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result10
+                    }
+                }
+            }
+            impl Bucket {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Delete the key-value pair associated with the key in the store.
+                ///
+                /// If the key does not exist in the store, it does nothing.
+                ///
+                /// If any other error occurs, it returns an `Err(error)`.
+                pub fn delete(&self, key: &str) -> Result<(), Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 4
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = key;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]bucket.delete"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result9 = match l3 {
+                            0 => {
+                                let e = ();
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l4 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    let v8 = match l4 {
+                                        0 => Error::NoSuchStore,
+                                        1 => Error::AccessDenied,
+                                        n => {
+                                            debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                            let e8 = {
+                                                let l5 = *ptr1
+                                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l6 = *ptr1
+                                                    .add(3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len7 = l6;
+                                                let bytes7 = _rt::Vec::from_raw_parts(
+                                                    l5.cast(),
+                                                    len7,
+                                                    len7,
+                                                );
+                                                _rt::string_lift(bytes7)
+                                            };
+                                            Error::Other(e8)
+                                        }
+                                    };
+                                    v8
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result9
+                    }
+                }
+            }
+            impl Bucket {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Check if the key exists in the store.
+                ///
+                /// If the key exists in the store, it returns `Ok(true)`. If the key does
+                /// not exist in the store, it returns `Ok(false)`.
+                ///
+                /// If any other error occurs, it returns an `Err(error)`.
+                pub fn exists(&self, key: &str) -> Result<bool, Error> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 4 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 4
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let vec0 = key;
+                        let ptr0 = vec0.as_ptr().cast::<u8>();
+                        let len0 = vec0.len();
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]bucket.exists"]
+                            fn wit_import2(_: i32, _: *mut u8, _: usize, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: *mut u8,
+                            _: usize,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                ptr0.cast_mut(),
+                                len0,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result10 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    _rt::bool_lift(l4 as u8)
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l5 = i32::from(
+                                        *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<u8>(),
+                                    );
+                                    let v9 = match l5 {
+                                        0 => Error::NoSuchStore,
+                                        1 => Error::AccessDenied,
+                                        n => {
+                                            debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                            let e9 = {
+                                                let l6 = *ptr1
+                                                    .add(2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l7 = *ptr1
+                                                    .add(3 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len8 = l7;
+                                                let bytes8 = _rt::Vec::from_raw_parts(
+                                                    l6.cast(),
+                                                    len8,
+                                                    len8,
+                                                );
+                                                _rt::string_lift(bytes8)
+                                            };
+                                            Error::Other(e9)
+                                        }
+                                    };
+                                    v9
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result10
+                    }
+                }
+            }
+            impl Bucket {
+                #[allow(unused_unsafe, clippy::all)]
+                /// Get all the keys in the store with an optional cursor (for use in pagination). It
+                /// returns a list of keys. Please note that for most KeyValue implementations, this is a
+                /// can be a very expensive operation and so it should be used judiciously. Implementations
+                /// can return any number of keys in a single response, but they should never attempt to
+                /// send more data than is reasonable (i.e. on a small edge device, this may only be a few
+                /// KB, while on a large machine this could be several MB). Any response should also return
+                /// a cursor that can be used to fetch the next page of keys. See the `key-response` record
+                /// for more information.
+                ///
+                /// Note that the keys are not guaranteed to be returned in any particular order.
+                ///
+                /// If the store is empty, it returns an empty list.
+                ///
+                /// MAY show an out-of-date list of keys if there are concurrent writes to the store.
+                ///
+                /// If any error occurs, it returns an `Err(error)`.
+                pub fn list_keys(
+                    &self,
+                    cursor: Option<u64>,
+                ) -> Result<KeyResponse, Error> {
+                    unsafe {
+                        #[repr(align(8))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 24 + 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 24
+                                + 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let (result0_0, result0_1) = match cursor {
+                            Some(e) => (1i32, _rt::as_i64(e)),
+                            None => (0i32, 0i64),
+                        };
+                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "wasi:keyvalue/store@0.2.0-draft")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]bucket.list-keys"]
+                            fn wit_import2(_: i32, _: i32, _: i64, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import2(
+                            _: i32,
+                            _: i32,
+                            _: i64,
+                            _: *mut u8,
+                        ) {
+                            unreachable!()
+                        }
+                        unsafe {
+                            wit_import2(
+                                (self).handle() as i32,
+                                result0_0,
+                                result0_1,
+                                ptr1,
+                            )
+                        };
+                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
+                        let result17 = match l3 {
+                            0 => {
+                                let e = {
+                                    let l4 = *ptr1.add(8).cast::<*mut u8>();
+                                    let l5 = *ptr1
+                                        .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let base9 = l4;
+                                    let len9 = l5;
+                                    let mut result9 = _rt::Vec::with_capacity(len9);
+                                    for i in 0..len9 {
+                                        let base = base9
+                                            .add(i * (2 * ::core::mem::size_of::<*const u8>()));
+                                        let e9 = {
+                                            let l6 = *base.add(0).cast::<*mut u8>();
+                                            let l7 = *base
+                                                .add(::core::mem::size_of::<*const u8>())
+                                                .cast::<usize>();
+                                            let len8 = l7;
+                                            let bytes8 = _rt::Vec::from_raw_parts(
+                                                l6.cast(),
+                                                len8,
+                                                len8,
+                                            );
+                                            _rt::string_lift(bytes8)
+                                        };
+                                        result9.push(e9);
+                                    }
+                                    _rt::cabi_dealloc(
+                                        base9,
+                                        len9 * (2 * ::core::mem::size_of::<*const u8>()),
+                                        ::core::mem::size_of::<*const u8>(),
+                                    );
+                                    let l10 = i32::from(
+                                        *ptr1
+                                            .add(8 + 2 * ::core::mem::size_of::<*const u8>())
+                                            .cast::<u8>(),
+                                    );
+                                    KeyResponse {
+                                        keys: result9,
+                                        cursor: match l10 {
+                                            0 => None,
+                                            1 => {
+                                                let e = {
+                                                    let l11 = *ptr1
+                                                        .add(16 + 2 * ::core::mem::size_of::<*const u8>())
+                                                        .cast::<i64>();
+                                                    l11 as u64
+                                                };
+                                                Some(e)
+                                            }
+                                            _ => _rt::invalid_enum_discriminant(),
+                                        },
+                                    }
+                                };
+                                Ok(e)
+                            }
+                            1 => {
+                                let e = {
+                                    let l12 = i32::from(*ptr1.add(8).cast::<u8>());
+                                    let v16 = match l12 {
+                                        0 => Error::NoSuchStore,
+                                        1 => Error::AccessDenied,
+                                        n => {
+                                            debug_assert_eq!(n, 2, "invalid enum discriminant");
+                                            let e16 = {
+                                                let l13 = *ptr1
+                                                    .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<*mut u8>();
+                                                let l14 = *ptr1
+                                                    .add(8 + 2 * ::core::mem::size_of::<*const u8>())
+                                                    .cast::<usize>();
+                                                let len15 = l14;
+                                                let bytes15 = _rt::Vec::from_raw_parts(
+                                                    l13.cast(),
+                                                    len15,
+                                                    len15,
+                                                );
+                                                _rt::string_lift(bytes15)
+                                            };
+                                            Error::Other(e16)
+                                        }
+                                    };
+                                    v16
+                                };
+                                Err(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result17
+                    }
+                }
+            }
+        }
+    }
     pub mod logging {
         #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
         pub mod logging {
@@ -10099,693 +10888,6 @@ pub mod wasi {
                             len1,
                         )
                     };
-                }
-            }
-        }
-    }
-    pub mod sql {
-        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-        pub mod types {
-            #[used]
-            #[doc(hidden)]
-            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
-            use super::super::super::_rt;
-            #[derive(Clone)]
-            pub enum DataType {
-                Int32(i32),
-                Int64(i64),
-                Uint32(u32),
-                Uint64(u64),
-                Float(f64),
-                Double(f64),
-                Str(_rt::String),
-                Boolean(bool),
-                Date(_rt::String),
-                Time(_rt::String),
-                Timestamp(_rt::String),
-                Binary(_rt::Vec<u8>),
-                Null,
-            }
-            impl ::core::fmt::Debug for DataType {
-                fn fmt(
-                    &self,
-                    f: &mut ::core::fmt::Formatter<'_>,
-                ) -> ::core::fmt::Result {
-                    match self {
-                        DataType::Int32(e) => {
-                            f.debug_tuple("DataType::Int32").field(e).finish()
-                        }
-                        DataType::Int64(e) => {
-                            f.debug_tuple("DataType::Int64").field(e).finish()
-                        }
-                        DataType::Uint32(e) => {
-                            f.debug_tuple("DataType::Uint32").field(e).finish()
-                        }
-                        DataType::Uint64(e) => {
-                            f.debug_tuple("DataType::Uint64").field(e).finish()
-                        }
-                        DataType::Float(e) => {
-                            f.debug_tuple("DataType::Float").field(e).finish()
-                        }
-                        DataType::Double(e) => {
-                            f.debug_tuple("DataType::Double").field(e).finish()
-                        }
-                        DataType::Str(e) => {
-                            f.debug_tuple("DataType::Str").field(e).finish()
-                        }
-                        DataType::Boolean(e) => {
-                            f.debug_tuple("DataType::Boolean").field(e).finish()
-                        }
-                        DataType::Date(e) => {
-                            f.debug_tuple("DataType::Date").field(e).finish()
-                        }
-                        DataType::Time(e) => {
-                            f.debug_tuple("DataType::Time").field(e).finish()
-                        }
-                        DataType::Timestamp(e) => {
-                            f.debug_tuple("DataType::Timestamp").field(e).finish()
-                        }
-                        DataType::Binary(e) => {
-                            f.debug_tuple("DataType::Binary").field(e).finish()
-                        }
-                        DataType::Null => f.debug_tuple("DataType::Null").finish(),
-                    }
-                }
-            }
-            #[derive(Clone)]
-            pub struct Row {
-                pub field_name: _rt::String,
-                pub value: DataType,
-            }
-            impl ::core::fmt::Debug for Row {
-                fn fmt(
-                    &self,
-                    f: &mut ::core::fmt::Formatter<'_>,
-                ) -> ::core::fmt::Result {
-                    f.debug_struct("Row")
-                        .field("field-name", &self.field_name)
-                        .field("value", &self.value)
-                        .finish()
-                }
-            }
-            #[derive(Debug)]
-            #[repr(transparent)]
-            pub struct Statement {
-                handle: _rt::Resource<Statement>,
-            }
-            impl Statement {
-                #[doc(hidden)]
-                pub unsafe fn from_handle(handle: u32) -> Self {
-                    Self {
-                        handle: unsafe { _rt::Resource::from_handle(handle) },
-                    }
-                }
-                #[doc(hidden)]
-                pub fn take_handle(&self) -> u32 {
-                    _rt::Resource::take_handle(&self.handle)
-                }
-                #[doc(hidden)]
-                pub fn handle(&self) -> u32 {
-                    _rt::Resource::handle(&self.handle)
-                }
-            }
-            unsafe impl _rt::WasmResource for Statement {
-                #[inline]
-                unsafe fn drop(_handle: u32) {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unreachable!();
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[resource-drop]statement"]
-                            fn drop(_: u32);
-                        }
-                        unsafe { drop(_handle) };
-                    }
-                }
-            }
-            #[derive(Debug)]
-            #[repr(transparent)]
-            pub struct Error {
-                handle: _rt::Resource<Error>,
-            }
-            impl Error {
-                #[doc(hidden)]
-                pub unsafe fn from_handle(handle: u32) -> Self {
-                    Self {
-                        handle: unsafe { _rt::Resource::from_handle(handle) },
-                    }
-                }
-                #[doc(hidden)]
-                pub fn take_handle(&self) -> u32 {
-                    _rt::Resource::take_handle(&self.handle)
-                }
-                #[doc(hidden)]
-                pub fn handle(&self) -> u32 {
-                    _rt::Resource::handle(&self.handle)
-                }
-            }
-            unsafe impl _rt::WasmResource for Error {
-                #[inline]
-                unsafe fn drop(_handle: u32) {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unreachable!();
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[resource-drop]error"]
-                            fn drop(_: u32);
-                        }
-                        unsafe { drop(_handle) };
-                    }
-                }
-            }
-            #[derive(Debug)]
-            #[repr(transparent)]
-            pub struct Connection {
-                handle: _rt::Resource<Connection>,
-            }
-            impl Connection {
-                #[doc(hidden)]
-                pub unsafe fn from_handle(handle: u32) -> Self {
-                    Self {
-                        handle: unsafe { _rt::Resource::from_handle(handle) },
-                    }
-                }
-                #[doc(hidden)]
-                pub fn take_handle(&self) -> u32 {
-                    _rt::Resource::take_handle(&self.handle)
-                }
-                #[doc(hidden)]
-                pub fn handle(&self) -> u32 {
-                    _rt::Resource::handle(&self.handle)
-                }
-            }
-            unsafe impl _rt::WasmResource for Connection {
-                #[inline]
-                unsafe fn drop(_handle: u32) {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unreachable!();
-                    #[cfg(target_arch = "wasm32")]
-                    {
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[resource-drop]connection"]
-                            fn drop(_: u32);
-                        }
-                        unsafe { drop(_handle) };
-                    }
-                }
-            }
-            impl Statement {
-                #[allow(unused_unsafe, clippy::all)]
-                pub fn prepare(
-                    query: &str,
-                    params: &[_rt::String],
-                ) -> Result<Statement, Error> {
-                    unsafe {
-                        #[repr(align(4))]
-                        struct RetArea([::core::mem::MaybeUninit<u8>; 8]);
-                        let mut ret_area = RetArea(
-                            [::core::mem::MaybeUninit::uninit(); 8],
-                        );
-                        let vec0 = query;
-                        let ptr0 = vec0.as_ptr().cast::<u8>();
-                        let len0 = vec0.len();
-                        let vec2 = params;
-                        let len2 = vec2.len();
-                        let layout2 = _rt::alloc::Layout::from_size_align_unchecked(
-                            vec2.len() * (2 * ::core::mem::size_of::<*const u8>()),
-                            ::core::mem::size_of::<*const u8>(),
-                        );
-                        let result2 = if layout2.size() != 0 {
-                            let ptr = _rt::alloc::alloc(layout2).cast::<u8>();
-                            if ptr.is_null() {
-                                _rt::alloc::handle_alloc_error(layout2);
-                            }
-                            ptr
-                        } else {
-                            ::core::ptr::null_mut()
-                        };
-                        for (i, e) in vec2.into_iter().enumerate() {
-                            let base = result2
-                                .add(i * (2 * ::core::mem::size_of::<*const u8>()));
-                            {
-                                let vec1 = e;
-                                let ptr1 = vec1.as_ptr().cast::<u8>();
-                                let len1 = vec1.len();
-                                *base
-                                    .add(::core::mem::size_of::<*const u8>())
-                                    .cast::<usize>() = len1;
-                                *base.add(0).cast::<*mut u8>() = ptr1.cast_mut();
-                            }
-                        }
-                        let ptr3 = ret_area.0.as_mut_ptr().cast::<u8>();
-                        #[cfg(target_arch = "wasm32")]
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[static]statement.prepare"]
-                            fn wit_import4(
-                                _: *mut u8,
-                                _: usize,
-                                _: *mut u8,
-                                _: usize,
-                                _: *mut u8,
-                            );
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        unsafe extern "C" fn wit_import4(
-                            _: *mut u8,
-                            _: usize,
-                            _: *mut u8,
-                            _: usize,
-                            _: *mut u8,
-                        ) {
-                            unreachable!()
-                        }
-                        unsafe {
-                            wit_import4(ptr0.cast_mut(), len0, result2, len2, ptr3)
-                        };
-                        let l5 = i32::from(*ptr3.add(0).cast::<u8>());
-                        let result8 = match l5 {
-                            0 => {
-                                let e = {
-                                    let l6 = *ptr3.add(4).cast::<i32>();
-                                    unsafe { Statement::from_handle(l6 as u32) }
-                                };
-                                Ok(e)
-                            }
-                            1 => {
-                                let e = {
-                                    let l7 = *ptr3.add(4).cast::<i32>();
-                                    unsafe { Error::from_handle(l7 as u32) }
-                                };
-                                Err(e)
-                            }
-                            _ => _rt::invalid_enum_discriminant(),
-                        };
-                        if layout2.size() != 0 {
-                            _rt::alloc::dealloc(result2.cast(), layout2);
-                        }
-                        result8
-                    }
-                }
-            }
-            impl Error {
-                #[allow(unused_unsafe, clippy::all)]
-                pub fn trace(&self) -> _rt::String {
-                    unsafe {
-                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
-                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
-                        struct RetArea(
-                            [::core::mem::MaybeUninit<
-                                u8,
-                            >; 2 * ::core::mem::size_of::<*const u8>()],
-                        );
-                        let mut ret_area = RetArea(
-                            [::core::mem::MaybeUninit::uninit(); 2
-                                * ::core::mem::size_of::<*const u8>()],
-                        );
-                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
-                        #[cfg(target_arch = "wasm32")]
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[method]error.trace"]
-                            fn wit_import1(_: i32, _: *mut u8);
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
-                            unreachable!()
-                        }
-                        unsafe { wit_import1((self).handle() as i32, ptr0) };
-                        let l2 = *ptr0.add(0).cast::<*mut u8>();
-                        let l3 = *ptr0
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<usize>();
-                        let len4 = l3;
-                        let bytes4 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
-                        let result5 = _rt::string_lift(bytes4);
-                        result5
-                    }
-                }
-            }
-            impl Connection {
-                #[allow(unused_unsafe, clippy::all)]
-                pub fn open(name: &str) -> Result<Connection, Error> {
-                    unsafe {
-                        #[repr(align(4))]
-                        struct RetArea([::core::mem::MaybeUninit<u8>; 8]);
-                        let mut ret_area = RetArea(
-                            [::core::mem::MaybeUninit::uninit(); 8],
-                        );
-                        let vec0 = name;
-                        let ptr0 = vec0.as_ptr().cast::<u8>();
-                        let len0 = vec0.len();
-                        let ptr1 = ret_area.0.as_mut_ptr().cast::<u8>();
-                        #[cfg(target_arch = "wasm32")]
-                        #[link(wasm_import_module = "wasi:sql/types@0.2.0-draft")]
-                        unsafe extern "C" {
-                            #[link_name = "[static]connection.open"]
-                            fn wit_import2(_: *mut u8, _: usize, _: *mut u8);
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        unsafe extern "C" fn wit_import2(
-                            _: *mut u8,
-                            _: usize,
-                            _: *mut u8,
-                        ) {
-                            unreachable!()
-                        }
-                        unsafe { wit_import2(ptr0.cast_mut(), len0, ptr1) };
-                        let l3 = i32::from(*ptr1.add(0).cast::<u8>());
-                        let result6 = match l3 {
-                            0 => {
-                                let e = {
-                                    let l4 = *ptr1.add(4).cast::<i32>();
-                                    unsafe { Connection::from_handle(l4 as u32) }
-                                };
-                                Ok(e)
-                            }
-                            1 => {
-                                let e = {
-                                    let l5 = *ptr1.add(4).cast::<i32>();
-                                    unsafe { Error::from_handle(l5 as u32) }
-                                };
-                                Err(e)
-                            }
-                            _ => _rt::invalid_enum_discriminant(),
-                        };
-                        result6
-                    }
-                }
-            }
-        }
-        #[allow(dead_code, async_fn_in_trait, unused_imports, clippy::all)]
-        pub mod readwrite {
-            #[used]
-            #[doc(hidden)]
-            static __FORCE_SECTION_REF: fn() = super::super::super::__link_custom_section_describing_imports;
-            use super::super::super::_rt;
-            pub type Statement = super::super::super::wasi::sql::types::Statement;
-            pub type Row = super::super::super::wasi::sql::types::Row;
-            pub type Error = super::super::super::wasi::sql::types::Error;
-            pub type Connection = super::super::super::wasi::sql::types::Connection;
-            #[allow(unused_unsafe, clippy::all)]
-            pub fn query(c: &Connection, q: &Statement) -> Result<_rt::Vec<Row>, Error> {
-                unsafe {
-                    #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
-                    #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
-                    struct RetArea(
-                        [::core::mem::MaybeUninit<
-                            u8,
-                        >; 3 * ::core::mem::size_of::<*const u8>()],
-                    );
-                    let mut ret_area = RetArea(
-                        [::core::mem::MaybeUninit::uninit(); 3
-                            * ::core::mem::size_of::<*const u8>()],
-                    );
-                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
-                    #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:sql/readwrite@0.2.0-draft")]
-                    unsafe extern "C" {
-                        #[link_name = "query"]
-                        fn wit_import1(_: i32, _: i32, _: *mut u8);
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unsafe extern "C" fn wit_import1(_: i32, _: i32, _: *mut u8) {
-                        unreachable!()
-                    }
-                    unsafe {
-                        wit_import1((c).handle() as i32, (q).handle() as i32, ptr0)
-                    };
-                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
-                    let result34 = match l2 {
-                        0 => {
-                            let e = {
-                                let l3 = *ptr0
-                                    .add(::core::mem::size_of::<*const u8>())
-                                    .cast::<*mut u8>();
-                                let l4 = *ptr0
-                                    .add(2 * ::core::mem::size_of::<*const u8>())
-                                    .cast::<usize>();
-                                let base32 = l3;
-                                let len32 = l4;
-                                let mut result32 = _rt::Vec::with_capacity(len32);
-                                for i in 0..len32 {
-                                    let base = base32
-                                        .add(i * (8 + 4 * ::core::mem::size_of::<*const u8>()));
-                                    let e32 = {
-                                        let l5 = *base.add(0).cast::<*mut u8>();
-                                        let l6 = *base
-                                            .add(::core::mem::size_of::<*const u8>())
-                                            .cast::<usize>();
-                                        let len7 = l6;
-                                        let bytes7 = _rt::Vec::from_raw_parts(
-                                            l5.cast(),
-                                            len7,
-                                            len7,
-                                        );
-                                        let l8 = i32::from(
-                                            *base
-                                                .add(2 * ::core::mem::size_of::<*const u8>())
-                                                .cast::<u8>(),
-                                        );
-                                        use super::super::super::wasi::sql::types::DataType as V31;
-                                        let v31 = match l8 {
-                                            0 => {
-                                                let e31 = {
-                                                    let l9 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<i32>();
-                                                    l9
-                                                };
-                                                V31::Int32(e31)
-                                            }
-                                            1 => {
-                                                let e31 = {
-                                                    let l10 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<i64>();
-                                                    l10
-                                                };
-                                                V31::Int64(e31)
-                                            }
-                                            2 => {
-                                                let e31 = {
-                                                    let l11 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<i32>();
-                                                    l11 as u32
-                                                };
-                                                V31::Uint32(e31)
-                                            }
-                                            3 => {
-                                                let e31 = {
-                                                    let l12 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<i64>();
-                                                    l12 as u64
-                                                };
-                                                V31::Uint64(e31)
-                                            }
-                                            4 => {
-                                                let e31 = {
-                                                    let l13 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<f64>();
-                                                    l13
-                                                };
-                                                V31::Float(e31)
-                                            }
-                                            5 => {
-                                                let e31 = {
-                                                    let l14 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<f64>();
-                                                    l14
-                                                };
-                                                V31::Double(e31)
-                                            }
-                                            6 => {
-                                                let e31 = {
-                                                    let l15 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<*mut u8>();
-                                                    let l16 = *base
-                                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<usize>();
-                                                    let len17 = l16;
-                                                    let bytes17 = _rt::Vec::from_raw_parts(
-                                                        l15.cast(),
-                                                        len17,
-                                                        len17,
-                                                    );
-                                                    _rt::string_lift(bytes17)
-                                                };
-                                                V31::Str(e31)
-                                            }
-                                            7 => {
-                                                let e31 = {
-                                                    let l18 = i32::from(
-                                                        *base
-                                                            .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<u8>(),
-                                                    );
-                                                    _rt::bool_lift(l18 as u8)
-                                                };
-                                                V31::Boolean(e31)
-                                            }
-                                            8 => {
-                                                let e31 = {
-                                                    let l19 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<*mut u8>();
-                                                    let l20 = *base
-                                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<usize>();
-                                                    let len21 = l20;
-                                                    let bytes21 = _rt::Vec::from_raw_parts(
-                                                        l19.cast(),
-                                                        len21,
-                                                        len21,
-                                                    );
-                                                    _rt::string_lift(bytes21)
-                                                };
-                                                V31::Date(e31)
-                                            }
-                                            9 => {
-                                                let e31 = {
-                                                    let l22 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<*mut u8>();
-                                                    let l23 = *base
-                                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<usize>();
-                                                    let len24 = l23;
-                                                    let bytes24 = _rt::Vec::from_raw_parts(
-                                                        l22.cast(),
-                                                        len24,
-                                                        len24,
-                                                    );
-                                                    _rt::string_lift(bytes24)
-                                                };
-                                                V31::Time(e31)
-                                            }
-                                            10 => {
-                                                let e31 = {
-                                                    let l25 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<*mut u8>();
-                                                    let l26 = *base
-                                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<usize>();
-                                                    let len27 = l26;
-                                                    let bytes27 = _rt::Vec::from_raw_parts(
-                                                        l25.cast(),
-                                                        len27,
-                                                        len27,
-                                                    );
-                                                    _rt::string_lift(bytes27)
-                                                };
-                                                V31::Timestamp(e31)
-                                            }
-                                            11 => {
-                                                let e31 = {
-                                                    let l28 = *base
-                                                        .add(8 + 2 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<*mut u8>();
-                                                    let l29 = *base
-                                                        .add(8 + 3 * ::core::mem::size_of::<*const u8>())
-                                                        .cast::<usize>();
-                                                    let len30 = l29;
-                                                    _rt::Vec::from_raw_parts(l28.cast(), len30, len30)
-                                                };
-                                                V31::Binary(e31)
-                                            }
-                                            n => {
-                                                debug_assert_eq!(n, 12, "invalid enum discriminant");
-                                                V31::Null
-                                            }
-                                        };
-                                        super::super::super::wasi::sql::types::Row {
-                                            field_name: _rt::string_lift(bytes7),
-                                            value: v31,
-                                        }
-                                    };
-                                    result32.push(e32);
-                                }
-                                _rt::cabi_dealloc(
-                                    base32,
-                                    len32 * (8 + 4 * ::core::mem::size_of::<*const u8>()),
-                                    8,
-                                );
-                                result32
-                            };
-                            Ok(e)
-                        }
-                        1 => {
-                            let e = {
-                                let l33 = *ptr0
-                                    .add(::core::mem::size_of::<*const u8>())
-                                    .cast::<i32>();
-                                unsafe {
-                                    super::super::super::wasi::sql::types::Error::from_handle(
-                                        l33 as u32,
-                                    )
-                                }
-                            };
-                            Err(e)
-                        }
-                        _ => _rt::invalid_enum_discriminant(),
-                    };
-                    result34
-                }
-            }
-            #[allow(unused_unsafe, clippy::all)]
-            pub fn exec(c: &Connection, q: &Statement) -> Result<u32, Error> {
-                unsafe {
-                    #[repr(align(4))]
-                    struct RetArea([::core::mem::MaybeUninit<u8>; 8]);
-                    let mut ret_area = RetArea([::core::mem::MaybeUninit::uninit(); 8]);
-                    let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
-                    #[cfg(target_arch = "wasm32")]
-                    #[link(wasm_import_module = "wasi:sql/readwrite@0.2.0-draft")]
-                    unsafe extern "C" {
-                        #[link_name = "exec"]
-                        fn wit_import1(_: i32, _: i32, _: *mut u8);
-                    }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    unsafe extern "C" fn wit_import1(_: i32, _: i32, _: *mut u8) {
-                        unreachable!()
-                    }
-                    unsafe {
-                        wit_import1((c).handle() as i32, (q).handle() as i32, ptr0)
-                    };
-                    let l2 = i32::from(*ptr0.add(0).cast::<u8>());
-                    let result5 = match l2 {
-                        0 => {
-                            let e = {
-                                let l3 = *ptr0.add(4).cast::<i32>();
-                                l3 as u32
-                            };
-                            Ok(e)
-                        }
-                        1 => {
-                            let e = {
-                                let l4 = *ptr0.add(4).cast::<i32>();
-                                unsafe {
-                                    super::super::super::wasi::sql::types::Error::from_handle(
-                                        l4 as u32,
-                                    )
-                                }
-                            };
-                            Err(e)
-                        }
-                        _ => _rt::invalid_enum_discriminant(),
-                    };
-                    result5
                 }
             }
         }
@@ -11086,11 +11188,13 @@ macro_rules! __export_app_impl {
 #[doc(inline)]
 pub(crate) use __export_app_impl as export;
 #[cfg(target_arch = "wasm32")]
-#[unsafe(link_section = "component-type:wit-bindgen:0.41.0:pushit:hello-fn:app:encoded world")]
+#[unsafe(
+    link_section = "component-type:wit-bindgen:0.41.0:pushit:hello-fn:app:encoded world"
+)]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 9375] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xa5H\x01A\x02\x01A.\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 9187] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xe9F\x01A\x02\x01A(\x01\
 B\x0a\x01o\x02ss\x01p\0\x01@\0\0\x01\x04\0\x0fget-environment\x01\x02\x01ps\x01@\
 \0\0\x03\x04\0\x0dget-arguments\x01\x04\x01ks\x01@\0\0\x05\x04\0\x0binitial-cwd\x01\
 \x06\x03\0\x1awasi:cli/environment@0.2.0\x05\0\x01B\x04\x04\0\x05error\x03\x01\x01\
@@ -11117,174 +11221,168 @@ tput-stream.blocking-write-and-flush\x01\x14\x01@\x01\x04self\x11\0\x13\x04\0\x1
 \x17\x04\05[method]output-stream.blocking-write-zeroes-and-flush\x01\x17\x01@\x03\
 \x04self\x11\x03src\x09\x03lenw\0\x0d\x04\0\x1c[method]output-stream.splice\x01\x18\
 \x04\0%[method]output-stream.blocking-splice\x01\x18\x03\0\x15wasi:io/streams@0.\
-2.0\x05\x05\x01B\x15\x01p}\x01q\x0d\x05int32\x01z\0\x05int64\x01x\0\x06uint32\x01\
-y\0\x06uint64\x01w\0\x05float\x01u\0\x06double\x01u\0\x03str\x01s\0\x07boolean\x01\
-\x7f\0\x04date\x01s\0\x04time\x01s\0\x09timestamp\x01s\0\x06binary\x01\0\0\x04nu\
-ll\0\0\x04\0\x09data-type\x03\0\x01\x01r\x02\x0afield-names\x05value\x02\x04\0\x03\
-row\x03\0\x03\x04\0\x09statement\x03\x01\x04\0\x05error\x03\x01\x04\0\x0aconnect\
-ion\x03\x01\x01ps\x01i\x05\x01i\x06\x01j\x01\x09\x01\x0a\x01@\x02\x05querys\x06p\
-arams\x08\0\x0b\x04\0\x19[static]statement.prepare\x01\x0c\x01h\x06\x01@\x01\x04\
-self\x0d\0s\x04\0\x13[method]error.trace\x01\x0e\x01i\x07\x01j\x01\x0f\x01\x0a\x01\
-@\x01\x04names\0\x10\x04\0\x17[static]connection.open\x01\x11\x03\0\x1awasi:sql/\
-types@0.2.0-draft\x05\x06\x02\x03\0\x04\x09statement\x02\x03\0\x04\x03row\x02\x03\
-\0\x04\x05error\x02\x03\0\x04\x0aconnection\x01B\x12\x02\x03\x02\x01\x07\x04\0\x09\
-statement\x03\0\0\x02\x03\x02\x01\x08\x04\0\x03row\x03\0\x02\x02\x03\x02\x01\x09\
-\x04\0\x05error\x03\0\x04\x02\x03\x02\x01\x0a\x04\0\x0aconnection\x03\0\x06\x01h\
-\x07\x01h\x01\x01p\x03\x01i\x05\x01j\x01\x0a\x01\x0b\x01@\x02\x01c\x08\x01q\x09\0\
-\x0c\x04\0\x05query\x01\x0d\x01j\x01y\x01\x0b\x01@\x02\x01c\x08\x01q\x09\0\x0e\x04\
-\0\x04exec\x01\x0f\x03\0\x1ewasi:sql/readwrite@0.2.0-draft\x05\x0b\x01B\x04\x01m\
-\x06\x05trace\x05debug\x04info\x04warn\x05error\x08critical\x04\0\x05level\x03\0\
-\0\x01@\x03\x05level\x01\x07contexts\x07messages\x01\0\x04\0\x03log\x01\x02\x03\0\
-\x20wasi:logging/logging@0.1.0-draft\x05\x0c\x02\x03\0\x03\x0cinput-stream\x02\x03\
-\0\x03\x0doutput-stream\x01B/\x02\x03\x02\x01\x0d\x04\0\x0cinput-stream\x03\0\0\x02\
-\x03\x02\x01\x0e\x04\0\x0doutput-stream\x03\0\x02\x01s\x04\0\x0econtainer-name\x03\
-\0\x04\x01s\x04\0\x0bobject-name\x03\0\x06\x01w\x04\0\x09timestamp\x03\0\x08\x01\
-w\x04\0\x0bobject-size\x03\0\x0a\x01s\x04\0\x05error\x03\0\x0c\x01r\x02\x04name\x05\
-\x0acreated-at\x09\x04\0\x12container-metadata\x03\0\x0e\x01r\x04\x04name\x07\x09\
-container\x05\x0acreated-at\x09\x04size\x0b\x04\0\x0fobject-metadata\x03\0\x10\x01\
-r\x02\x09container\x05\x06object\x07\x04\0\x09object-id\x03\0\x12\x04\0\x0eoutgo\
-ing-value\x03\x01\x04\0\x0eincoming-value\x03\x01\x01p}\x04\0\x18incoming-value-\
-sync-body\x03\0\x16\x04\0\x19incoming-value-async-body\x03\0\x01\x01i\x14\x01@\0\
-\0\x19\x04\0)[static]outgoing-value.new-outgoing-value\x01\x1a\x01h\x14\x01i\x03\
-\x01j\x01\x1c\0\x01@\x01\x04self\x1b\0\x1d\x04\00[method]outgoing-value.outgoing\
--value-write-body\x01\x1e\x01j\0\x01\x0d\x01@\x01\x04this\x19\0\x1f\x04\0\x1d[st\
-atic]outgoing-value.finish\x01\x20\x01i\x15\x01j\x01\x17\x01\x0d\x01@\x01\x04thi\
-s!\0\"\x04\02[static]incoming-value.incoming-value-consume-sync\x01#\x01i\x18\x01\
-j\x01$\x01\x0d\x01@\x01\x04this!\0%\x04\03[static]incoming-value.incoming-value-\
-consume-async\x01&\x01h\x15\x01@\x01\x04self'\0w\x04\0\x1b[method]incoming-value\
-.size\x01(\x03\0\x20wasi:blobstore/types@0.2.0-draft\x05\x0f\x02\x03\0\x07\x12co\
-ntainer-metadata\x02\x03\0\x07\x05error\x02\x03\0\x07\x0eincoming-value\x02\x03\0\
-\x07\x0fobject-metadata\x02\x03\0\x07\x0bobject-name\x02\x03\0\x07\x0eoutgoing-v\
-alue\x01B7\x02\x03\x02\x01\x10\x04\0\x12container-metadata\x03\0\0\x02\x03\x02\x01\
-\x11\x04\0\x05error\x03\0\x02\x02\x03\x02\x01\x12\x04\0\x0eincoming-value\x03\0\x04\
-\x02\x03\x02\x01\x13\x04\0\x0fobject-metadata\x03\0\x06\x02\x03\x02\x01\x14\x04\0\
-\x0bobject-name\x03\0\x08\x02\x03\x02\x01\x15\x04\0\x0eoutgoing-value\x03\0\x0a\x04\
-\0\x09container\x03\x01\x04\0\x13stream-object-names\x03\x01\x01h\x0c\x01j\x01s\x01\
-\x03\x01@\x01\x04self\x0e\0\x0f\x04\0\x16[method]container.name\x01\x10\x01j\x01\
-\x01\x01\x03\x01@\x01\x04self\x0e\0\x11\x04\0\x16[method]container.info\x01\x12\x01\
-i\x05\x01j\x01\x13\x01\x03\x01@\x04\x04self\x0e\x04name\x09\x05startw\x03endw\0\x14\
-\x04\0\x1a[method]container.get-data\x01\x15\x01h\x0b\x01j\0\x01\x03\x01@\x03\x04\
-self\x0e\x04name\x09\x04data\x16\0\x17\x04\0\x1c[method]container.write-data\x01\
-\x18\x01i\x0d\x01j\x01\x19\x01\x03\x01@\x01\x04self\x0e\0\x1a\x04\0\x1e[method]c\
-ontainer.list-objects\x01\x1b\x01@\x02\x04self\x0e\x04name\x09\0\x17\x04\0\x1f[m\
-ethod]container.delete-object\x01\x1c\x01p\x09\x01@\x02\x04self\x0e\x05names\x1d\
-\0\x17\x04\0\x20[method]container.delete-objects\x01\x1e\x01j\x01\x7f\x01\x03\x01\
-@\x02\x04self\x0e\x04name\x09\0\x1f\x04\0\x1c[method]container.has-object\x01\x20\
-\x01j\x01\x07\x01\x03\x01@\x02\x04self\x0e\x04name\x09\0!\x04\0\x1d[method]conta\
-iner.object-info\x01\"\x01@\x01\x04self\x0e\0\x17\x04\0\x17[method]container.cle\
-ar\x01#\x01h\x0d\x01o\x02\x1d\x7f\x01j\x01%\x01\x03\x01@\x02\x04self$\x03lenw\0&\
-\x04\04[method]stream-object-names.read-stream-object-names\x01'\x01o\x02w\x7f\x01\
-j\x01(\x01\x03\x01@\x02\x04self$\x03numw\0)\x04\04[method]stream-object-names.sk\
-ip-stream-object-names\x01*\x03\0$wasi:blobstore/container@0.2.0-draft\x05\x16\x02\
-\x03\0\x08\x09container\x02\x03\0\x07\x0econtainer-name\x02\x03\0\x07\x09object-\
-id\x01B\x16\x02\x03\x02\x01\x17\x04\0\x09container\x03\0\0\x02\x03\x02\x01\x11\x04\
-\0\x05error\x03\0\x02\x02\x03\x02\x01\x18\x04\0\x0econtainer-name\x03\0\x04\x02\x03\
-\x02\x01\x19\x04\0\x09object-id\x03\0\x06\x01i\x01\x01j\x01\x08\x01\x03\x01@\x01\
-\x04name\x05\0\x09\x04\0\x10create-container\x01\x0a\x04\0\x0dget-container\x01\x0a\
-\x01j\0\x01\x03\x01@\x01\x04name\x05\0\x0b\x04\0\x10delete-container\x01\x0c\x01\
-j\x01\x7f\x01\x03\x01@\x01\x04name\x05\0\x0d\x04\0\x10container-exists\x01\x0e\x01\
-@\x02\x03src\x07\x04dest\x07\0\x0b\x04\0\x0bcopy-object\x01\x0f\x04\0\x0bmove-ob\
-ject\x01\x0f\x03\0$wasi:blobstore/blobstore@0.2.0-draft\x05\x1a\x01B\x0f\x02\x03\
-\x02\x01\x04\x04\0\x08pollable\x03\0\0\x01w\x04\0\x07instant\x03\0\x02\x01w\x04\0\
-\x08duration\x03\0\x04\x01@\0\0\x03\x04\0\x03now\x01\x06\x01@\0\0\x05\x04\0\x0ar\
-esolution\x01\x07\x01i\x01\x01@\x01\x04when\x03\0\x08\x04\0\x11subscribe-instant\
-\x01\x09\x01@\x01\x04when\x05\0\x08\x04\0\x12subscribe-duration\x01\x0a\x03\0!wa\
-si:clocks/monotonic-clock@0.2.0\x05\x1b\x02\x03\0\x0a\x08duration\x01B\xc0\x01\x02\
-\x03\x02\x01\x1c\x04\0\x08duration\x03\0\0\x02\x03\x02\x01\x0d\x04\0\x0cinput-st\
-ream\x03\0\x02\x02\x03\x02\x01\x0e\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\x01\
-\x03\x04\0\x08io-error\x03\0\x06\x02\x03\x02\x01\x04\x04\0\x08pollable\x03\0\x08\
-\x01q\x0a\x03get\0\0\x04head\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07connect\
-\0\0\x07options\0\0\x05trace\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06method\x03\
-\0\x0a\x01q\x03\x04HTTP\0\0\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\0\x0c\
-\x01ks\x01k{\x01r\x02\x05rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-payload\x03\
-\0\x10\x01k}\x01r\x02\x08alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-alert-re\
-ceived-payload\x03\0\x13\x01ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\x04\0\
-\x12field-size-payload\x03\0\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09DNS-\
-error\x01\x11\0\x15destination-not-found\0\0\x17destination-unavailable\0\0\x19d\
-estination-IP-prohibited\0\0\x19destination-IP-unroutable\0\0\x12connection-refu\
-sed\0\0\x15connection-terminated\0\0\x12connection-timeout\0\0\x17connection-rea\
-d-timeout\0\0\x18connection-write-timeout\0\0\x18connection-limit-reached\0\0\x12\
-TLS-protocol-error\0\0\x15TLS-certificate-error\0\0\x12TLS-alert-received\x01\x14\
-\0\x13HTTP-request-denied\0\0\x1cHTTP-request-length-required\0\0\x16HTTP-reques\
-t-body-size\x01\x18\0\x1bHTTP-request-method-invalid\0\0\x18HTTP-request-URI-inv\
-alid\0\0\x19HTTP-request-URI-too-long\0\0\x20HTTP-request-header-section-size\x01\
-\x15\0\x18HTTP-request-header-size\x01\x19\0!HTTP-request-trailer-section-size\x01\
-\x15\0\x19HTTP-request-trailer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HT\
-TP-response-header-section-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\
-\x17HTTP-response-body-size\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\
-\0\x1aHTTP-response-trailer-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\
-\0\x1cHTTP-response-content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTT\
-P-upgrade-failed\0\0\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configur\
-ation-error\0\0\x0einternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\
-\x0einvalid-syntax\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\
-\0\x1c\x01s\x04\0\x09field-key\x03\0\x1e\x01p}\x04\0\x0bfield-value\x03\0\x20\x04\
-\0\x06fields\x03\x01\x04\0\x07headers\x03\0\"\x04\0\x08trailers\x03\0\"\x04\0\x10\
-incoming-request\x03\x01\x04\0\x10outgoing-request\x03\x01\x04\0\x0frequest-opti\
-ons\x03\x01\x04\0\x11response-outparam\x03\x01\x01{\x04\0\x0bstatus-code\x03\0)\x04\
-\0\x11incoming-response\x03\x01\x04\0\x0dincoming-body\x03\x01\x04\0\x0ffuture-t\
-railers\x03\x01\x04\0\x11outgoing-response\x03\x01\x04\0\x0doutgoing-body\x03\x01\
-\x04\0\x18future-incoming-response\x03\x01\x01i\"\x01@\0\01\x04\0\x13[constructo\
-r]fields\x012\x01o\x02\x1f!\x01p3\x01j\x011\x01\x1d\x01@\x01\x07entries4\05\x04\0\
-\x18[static]fields.from-list\x016\x01h\"\x01p!\x01@\x02\x04self7\x04name\x1f\08\x04\
-\0\x12[method]fields.get\x019\x01@\x02\x04self7\x04name\x1f\0\x7f\x04\0\x12[meth\
-od]fields.has\x01:\x01j\0\x01\x1d\x01@\x03\x04self7\x04name\x1f\x05value8\0;\x04\
-\0\x12[method]fields.set\x01<\x01@\x02\x04self7\x04name\x1f\0;\x04\0\x15[method]\
-fields.delete\x01=\x01@\x03\x04self7\x04name\x1f\x05value!\0;\x04\0\x15[method]f\
-ields.append\x01>\x01@\x01\x04self7\04\x04\0\x16[method]fields.entries\x01?\x01@\
-\x01\x04self7\01\x04\0\x14[method]fields.clone\x01@\x01h%\x01@\x01\x04self\xc1\0\
-\0\x0b\x04\0\x1f[method]incoming-request.method\x01B\x01@\x01\x04self\xc1\0\0\x0e\
-\x04\0([method]incoming-request.path-with-query\x01C\x01k\x0d\x01@\x01\x04self\xc1\
-\0\0\xc4\0\x04\0\x1f[method]incoming-request.scheme\x01E\x04\0\"[method]incoming\
--request.authority\x01C\x01i#\x01@\x01\x04self\xc1\0\0\xc6\0\x04\0\x20[method]in\
-coming-request.headers\x01G\x01i,\x01j\x01\xc8\0\0\x01@\x01\x04self\xc1\0\0\xc9\0\
-\x04\0\x20[method]incoming-request.consume\x01J\x01i&\x01@\x01\x07headers\xc6\0\0\
-\xcb\0\x04\0\x1d[constructor]outgoing-request\x01L\x01h&\x01i/\x01j\x01\xce\0\0\x01\
-@\x01\x04self\xcd\0\0\xcf\0\x04\0\x1d[method]outgoing-request.body\x01P\x01@\x01\
-\x04self\xcd\0\0\x0b\x04\0\x1f[method]outgoing-request.method\x01Q\x01j\0\0\x01@\
-\x02\x04self\xcd\0\x06method\x0b\0\xd2\0\x04\0#[method]outgoing-request.set-meth\
-od\x01S\x01@\x01\x04self\xcd\0\0\x0e\x04\0([method]outgoing-request.path-with-qu\
-ery\x01T\x01@\x02\x04self\xcd\0\x0fpath-with-query\x0e\0\xd2\0\x04\0,[method]out\
-going-request.set-path-with-query\x01U\x01@\x01\x04self\xcd\0\0\xc4\0\x04\0\x1f[\
-method]outgoing-request.scheme\x01V\x01@\x02\x04self\xcd\0\x06scheme\xc4\0\0\xd2\
-\0\x04\0#[method]outgoing-request.set-scheme\x01W\x04\0\"[method]outgoing-reques\
-t.authority\x01T\x01@\x02\x04self\xcd\0\x09authority\x0e\0\xd2\0\x04\0&[method]o\
-utgoing-request.set-authority\x01X\x01@\x01\x04self\xcd\0\0\xc6\0\x04\0\x20[meth\
-od]outgoing-request.headers\x01Y\x01i'\x01@\0\0\xda\0\x04\0\x1c[constructor]requ\
-est-options\x01[\x01h'\x01k\x01\x01@\x01\x04self\xdc\0\0\xdd\0\x04\0'[method]req\
-uest-options.connect-timeout\x01^\x01@\x02\x04self\xdc\0\x08duration\xdd\0\0\xd2\
-\0\x04\0+[method]request-options.set-connect-timeout\x01_\x04\0*[method]request-\
-options.first-byte-timeout\x01^\x04\0.[method]request-options.set-first-byte-tim\
-eout\x01_\x04\0-[method]request-options.between-bytes-timeout\x01^\x04\01[method\
-]request-options.set-between-bytes-timeout\x01_\x01i(\x01i.\x01j\x01\xe1\0\x01\x1b\
-\x01@\x02\x05param\xe0\0\x08response\xe2\0\x01\0\x04\0\x1d[static]response-outpa\
-ram.set\x01c\x01h+\x01@\x01\x04self\xe4\0\0*\x04\0\x20[method]incoming-response.\
-status\x01e\x01@\x01\x04self\xe4\0\0\xc6\0\x04\0![method]incoming-response.heade\
-rs\x01f\x01@\x01\x04self\xe4\0\0\xc9\0\x04\0![method]incoming-response.consume\x01\
-g\x01h,\x01i\x03\x01j\x01\xe9\0\0\x01@\x01\x04self\xe8\0\0\xea\0\x04\0\x1c[metho\
-d]incoming-body.stream\x01k\x01i-\x01@\x01\x04this\xc8\0\0\xec\0\x04\0\x1c[stati\
-c]incoming-body.finish\x01m\x01h-\x01i\x09\x01@\x01\x04self\xee\0\0\xef\0\x04\0!\
-[method]future-trailers.subscribe\x01p\x01i$\x01k\xf1\0\x01j\x01\xf2\0\x01\x1b\x01\
-j\x01\xf3\0\0\x01k\xf4\0\x01@\x01\x04self\xee\0\0\xf5\0\x04\0\x1b[method]future-\
-trailers.get\x01v\x01@\x01\x07headers\xc6\0\0\xe1\0\x04\0\x1e[constructor]outgoi\
-ng-response\x01w\x01h.\x01@\x01\x04self\xf8\0\0*\x04\0%[method]outgoing-response\
-.status-code\x01y\x01@\x02\x04self\xf8\0\x0bstatus-code*\0\xd2\0\x04\0)[method]o\
-utgoing-response.set-status-code\x01z\x01@\x01\x04self\xf8\0\0\xc6\0\x04\0![meth\
-od]outgoing-response.headers\x01{\x01@\x01\x04self\xf8\0\0\xcf\0\x04\0\x1e[metho\
-d]outgoing-response.body\x01|\x01h/\x01i\x05\x01j\x01\xfe\0\0\x01@\x01\x04self\xfd\
-\0\0\xff\0\x04\0\x1b[method]outgoing-body.write\x01\x80\x01\x01j\0\x01\x1b\x01@\x02\
-\x04this\xce\0\x08trailers\xf2\0\0\x81\x01\x04\0\x1c[static]outgoing-body.finish\
-\x01\x82\x01\x01h0\x01@\x01\x04self\x83\x01\0\xef\0\x04\0*[method]future-incomin\
-g-response.subscribe\x01\x84\x01\x01i+\x01j\x01\x85\x01\x01\x1b\x01j\x01\x86\x01\
-\0\x01k\x87\x01\x01@\x01\x04self\x83\x01\0\x88\x01\x04\0$[method]future-incoming\
--response.get\x01\x89\x01\x01h\x07\x01k\x1b\x01@\x01\x03err\x8a\x01\0\x8b\x01\x04\
-\0\x0fhttp-error-code\x01\x8c\x01\x03\0\x15wasi:http/types@0.2.0\x05\x1d\x02\x03\
-\0\x0b\x10incoming-request\x02\x03\0\x0b\x11response-outparam\x01B\x08\x02\x03\x02\
-\x01\x1e\x04\0\x10incoming-request\x03\0\0\x02\x03\x02\x01\x1f\x04\0\x11response\
--outparam\x03\0\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\
-\x01\0\x04\0\x06handle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.0\x05\x20\
-\x04\0\x13pushit:hello-fn/app\x04\0\x0b\x09\x01\0\x03app\x03\0\0\0G\x09producers\
-\x01\x0cprocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41\
-.0";
+2.0\x05\x05\x01B\x1c\x01q\x03\x0dno-such-store\0\0\x0daccess-denied\0\0\x05other\
+\x01s\0\x04\0\x05error\x03\0\0\x01ps\x01kw\x01r\x02\x04keys\x02\x06cursor\x03\x04\
+\0\x0ckey-response\x03\0\x04\x04\0\x06bucket\x03\x01\x01h\x06\x01p}\x01k\x08\x01\
+j\x01\x09\x01\x01\x01@\x02\x04self\x07\x03keys\0\x0a\x04\0\x12[method]bucket.get\
+\x01\x0b\x01j\0\x01\x01\x01@\x03\x04self\x07\x03keys\x05value\x08\0\x0c\x04\0\x12\
+[method]bucket.set\x01\x0d\x01@\x02\x04self\x07\x03keys\0\x0c\x04\0\x15[method]b\
+ucket.delete\x01\x0e\x01j\x01\x7f\x01\x01\x01@\x02\x04self\x07\x03keys\0\x0f\x04\
+\0\x15[method]bucket.exists\x01\x10\x01j\x01\x05\x01\x01\x01@\x02\x04self\x07\x06\
+cursor\x03\0\x11\x04\0\x18[method]bucket.list-keys\x01\x12\x01i\x06\x01j\x01\x13\
+\x01\x01\x01@\x01\x0aidentifiers\0\x14\x04\0\x04open\x01\x15\x03\0\x1fwasi:keyva\
+lue/store@0.2.0-draft\x05\x06\x01B\x04\x01m\x06\x05trace\x05debug\x04info\x04war\
+n\x05error\x08critical\x04\0\x05level\x03\0\0\x01@\x03\x05level\x01\x07contexts\x07\
+messages\x01\0\x04\0\x03log\x01\x02\x03\0\x20wasi:logging/logging@0.1.0-draft\x05\
+\x07\x02\x03\0\x03\x0cinput-stream\x02\x03\0\x03\x0doutput-stream\x01B/\x02\x03\x02\
+\x01\x08\x04\0\x0cinput-stream\x03\0\0\x02\x03\x02\x01\x09\x04\0\x0doutput-strea\
+m\x03\0\x02\x01s\x04\0\x0econtainer-name\x03\0\x04\x01s\x04\0\x0bobject-name\x03\
+\0\x06\x01w\x04\0\x09timestamp\x03\0\x08\x01w\x04\0\x0bobject-size\x03\0\x0a\x01\
+s\x04\0\x05error\x03\0\x0c\x01r\x02\x04name\x05\x0acreated-at\x09\x04\0\x12conta\
+iner-metadata\x03\0\x0e\x01r\x04\x04name\x07\x09container\x05\x0acreated-at\x09\x04\
+size\x0b\x04\0\x0fobject-metadata\x03\0\x10\x01r\x02\x09container\x05\x06object\x07\
+\x04\0\x09object-id\x03\0\x12\x04\0\x0eoutgoing-value\x03\x01\x04\0\x0eincoming-\
+value\x03\x01\x01p}\x04\0\x18incoming-value-sync-body\x03\0\x16\x04\0\x19incomin\
+g-value-async-body\x03\0\x01\x01i\x14\x01@\0\0\x19\x04\0)[static]outgoing-value.\
+new-outgoing-value\x01\x1a\x01h\x14\x01i\x03\x01j\x01\x1c\0\x01@\x01\x04self\x1b\
+\0\x1d\x04\00[method]outgoing-value.outgoing-value-write-body\x01\x1e\x01j\0\x01\
+\x0d\x01@\x01\x04this\x19\0\x1f\x04\0\x1d[static]outgoing-value.finish\x01\x20\x01\
+i\x15\x01j\x01\x17\x01\x0d\x01@\x01\x04this!\0\"\x04\02[static]incoming-value.in\
+coming-value-consume-sync\x01#\x01i\x18\x01j\x01$\x01\x0d\x01@\x01\x04this!\0%\x04\
+\03[static]incoming-value.incoming-value-consume-async\x01&\x01h\x15\x01@\x01\x04\
+self'\0w\x04\0\x1b[method]incoming-value.size\x01(\x03\0\x20wasi:blobstore/types\
+@0.2.0-draft\x05\x0a\x02\x03\0\x06\x12container-metadata\x02\x03\0\x06\x05error\x02\
+\x03\0\x06\x0eincoming-value\x02\x03\0\x06\x0fobject-metadata\x02\x03\0\x06\x0bo\
+bject-name\x02\x03\0\x06\x0eoutgoing-value\x01B7\x02\x03\x02\x01\x0b\x04\0\x12co\
+ntainer-metadata\x03\0\0\x02\x03\x02\x01\x0c\x04\0\x05error\x03\0\x02\x02\x03\x02\
+\x01\x0d\x04\0\x0eincoming-value\x03\0\x04\x02\x03\x02\x01\x0e\x04\0\x0fobject-m\
+etadata\x03\0\x06\x02\x03\x02\x01\x0f\x04\0\x0bobject-name\x03\0\x08\x02\x03\x02\
+\x01\x10\x04\0\x0eoutgoing-value\x03\0\x0a\x04\0\x09container\x03\x01\x04\0\x13s\
+tream-object-names\x03\x01\x01h\x0c\x01j\x01s\x01\x03\x01@\x01\x04self\x0e\0\x0f\
+\x04\0\x16[method]container.name\x01\x10\x01j\x01\x01\x01\x03\x01@\x01\x04self\x0e\
+\0\x11\x04\0\x16[method]container.info\x01\x12\x01i\x05\x01j\x01\x13\x01\x03\x01\
+@\x04\x04self\x0e\x04name\x09\x05startw\x03endw\0\x14\x04\0\x1a[method]container\
+.get-data\x01\x15\x01h\x0b\x01j\0\x01\x03\x01@\x03\x04self\x0e\x04name\x09\x04da\
+ta\x16\0\x17\x04\0\x1c[method]container.write-data\x01\x18\x01i\x0d\x01j\x01\x19\
+\x01\x03\x01@\x01\x04self\x0e\0\x1a\x04\0\x1e[method]container.list-objects\x01\x1b\
+\x01@\x02\x04self\x0e\x04name\x09\0\x17\x04\0\x1f[method]container.delete-object\
+\x01\x1c\x01p\x09\x01@\x02\x04self\x0e\x05names\x1d\0\x17\x04\0\x20[method]conta\
+iner.delete-objects\x01\x1e\x01j\x01\x7f\x01\x03\x01@\x02\x04self\x0e\x04name\x09\
+\0\x1f\x04\0\x1c[method]container.has-object\x01\x20\x01j\x01\x07\x01\x03\x01@\x02\
+\x04self\x0e\x04name\x09\0!\x04\0\x1d[method]container.object-info\x01\"\x01@\x01\
+\x04self\x0e\0\x17\x04\0\x17[method]container.clear\x01#\x01h\x0d\x01o\x02\x1d\x7f\
+\x01j\x01%\x01\x03\x01@\x02\x04self$\x03lenw\0&\x04\04[method]stream-object-name\
+s.read-stream-object-names\x01'\x01o\x02w\x7f\x01j\x01(\x01\x03\x01@\x02\x04self\
+$\x03numw\0)\x04\04[method]stream-object-names.skip-stream-object-names\x01*\x03\
+\0$wasi:blobstore/container@0.2.0-draft\x05\x11\x02\x03\0\x07\x09container\x02\x03\
+\0\x06\x0econtainer-name\x02\x03\0\x06\x09object-id\x01B\x16\x02\x03\x02\x01\x12\
+\x04\0\x09container\x03\0\0\x02\x03\x02\x01\x0c\x04\0\x05error\x03\0\x02\x02\x03\
+\x02\x01\x13\x04\0\x0econtainer-name\x03\0\x04\x02\x03\x02\x01\x14\x04\0\x09obje\
+ct-id\x03\0\x06\x01i\x01\x01j\x01\x08\x01\x03\x01@\x01\x04name\x05\0\x09\x04\0\x10\
+create-container\x01\x0a\x04\0\x0dget-container\x01\x0a\x01j\0\x01\x03\x01@\x01\x04\
+name\x05\0\x0b\x04\0\x10delete-container\x01\x0c\x01j\x01\x7f\x01\x03\x01@\x01\x04\
+name\x05\0\x0d\x04\0\x10container-exists\x01\x0e\x01@\x02\x03src\x07\x04dest\x07\
+\0\x0b\x04\0\x0bcopy-object\x01\x0f\x04\0\x0bmove-object\x01\x0f\x03\0$wasi:blob\
+store/blobstore@0.2.0-draft\x05\x15\x01B\x0f\x02\x03\x02\x01\x04\x04\0\x08pollab\
+le\x03\0\0\x01w\x04\0\x07instant\x03\0\x02\x01w\x04\0\x08duration\x03\0\x04\x01@\
+\0\0\x03\x04\0\x03now\x01\x06\x01@\0\0\x05\x04\0\x0aresolution\x01\x07\x01i\x01\x01\
+@\x01\x04when\x03\0\x08\x04\0\x11subscribe-instant\x01\x09\x01@\x01\x04when\x05\0\
+\x08\x04\0\x12subscribe-duration\x01\x0a\x03\0!wasi:clocks/monotonic-clock@0.2.0\
+\x05\x16\x02\x03\0\x09\x08duration\x01B\xc0\x01\x02\x03\x02\x01\x17\x04\0\x08dur\
+ation\x03\0\0\x02\x03\x02\x01\x08\x04\0\x0cinput-stream\x03\0\x02\x02\x03\x02\x01\
+\x09\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\x01\x03\x04\0\x08io-error\x03\0\
+\x06\x02\x03\x02\x01\x04\x04\0\x08pollable\x03\0\x08\x01q\x0a\x03get\0\0\x04head\
+\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07connect\0\0\x07options\0\0\x05trace\
+\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06method\x03\0\x0a\x01q\x03\x04HTTP\0\0\
+\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\0\x0c\x01ks\x01k{\x01r\x02\x05\
+rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-payload\x03\0\x10\x01k}\x01r\x02\x08\
+alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-alert-received-payload\x03\0\x13\x01\
+ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\x04\0\x12field-size-payload\x03\0\
+\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09DNS-error\x01\x11\0\x15destinati\
+on-not-found\0\0\x17destination-unavailable\0\0\x19destination-IP-prohibited\0\0\
+\x19destination-IP-unroutable\0\0\x12connection-refused\0\0\x15connection-termin\
+ated\0\0\x12connection-timeout\0\0\x17connection-read-timeout\0\0\x18connection-\
+write-timeout\0\0\x18connection-limit-reached\0\0\x12TLS-protocol-error\0\0\x15T\
+LS-certificate-error\0\0\x12TLS-alert-received\x01\x14\0\x13HTTP-request-denied\0\
+\0\x1cHTTP-request-length-required\0\0\x16HTTP-request-body-size\x01\x18\0\x1bHT\
+TP-request-method-invalid\0\0\x18HTTP-request-URI-invalid\0\0\x19HTTP-request-UR\
+I-too-long\0\0\x20HTTP-request-header-section-size\x01\x15\0\x18HTTP-request-hea\
+der-size\x01\x19\0!HTTP-request-trailer-section-size\x01\x15\0\x19HTTP-request-t\
+railer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HTTP-response-header-secti\
+on-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\x17HTTP-response-body-s\
+ize\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\0\x1aHTTP-response-tra\
+iler-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\0\x1cHTTP-response-\
+content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTTP-upgrade-failed\0\0\
+\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configuration-error\0\0\x0ei\
+nternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\x0einvalid-syntax\
+\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\0\x1c\x01s\x04\0\
+\x09field-key\x03\0\x1e\x01p}\x04\0\x0bfield-value\x03\0\x20\x04\0\x06fields\x03\
+\x01\x04\0\x07headers\x03\0\"\x04\0\x08trailers\x03\0\"\x04\0\x10incoming-reques\
+t\x03\x01\x04\0\x10outgoing-request\x03\x01\x04\0\x0frequest-options\x03\x01\x04\
+\0\x11response-outparam\x03\x01\x01{\x04\0\x0bstatus-code\x03\0)\x04\0\x11incomi\
+ng-response\x03\x01\x04\0\x0dincoming-body\x03\x01\x04\0\x0ffuture-trailers\x03\x01\
+\x04\0\x11outgoing-response\x03\x01\x04\0\x0doutgoing-body\x03\x01\x04\0\x18futu\
+re-incoming-response\x03\x01\x01i\"\x01@\0\01\x04\0\x13[constructor]fields\x012\x01\
+o\x02\x1f!\x01p3\x01j\x011\x01\x1d\x01@\x01\x07entries4\05\x04\0\x18[static]fiel\
+ds.from-list\x016\x01h\"\x01p!\x01@\x02\x04self7\x04name\x1f\08\x04\0\x12[method\
+]fields.get\x019\x01@\x02\x04self7\x04name\x1f\0\x7f\x04\0\x12[method]fields.has\
+\x01:\x01j\0\x01\x1d\x01@\x03\x04self7\x04name\x1f\x05value8\0;\x04\0\x12[method\
+]fields.set\x01<\x01@\x02\x04self7\x04name\x1f\0;\x04\0\x15[method]fields.delete\
+\x01=\x01@\x03\x04self7\x04name\x1f\x05value!\0;\x04\0\x15[method]fields.append\x01\
+>\x01@\x01\x04self7\04\x04\0\x16[method]fields.entries\x01?\x01@\x01\x04self7\01\
+\x04\0\x14[method]fields.clone\x01@\x01h%\x01@\x01\x04self\xc1\0\0\x0b\x04\0\x1f\
+[method]incoming-request.method\x01B\x01@\x01\x04self\xc1\0\0\x0e\x04\0([method]\
+incoming-request.path-with-query\x01C\x01k\x0d\x01@\x01\x04self\xc1\0\0\xc4\0\x04\
+\0\x1f[method]incoming-request.scheme\x01E\x04\0\"[method]incoming-request.autho\
+rity\x01C\x01i#\x01@\x01\x04self\xc1\0\0\xc6\0\x04\0\x20[method]incoming-request\
+.headers\x01G\x01i,\x01j\x01\xc8\0\0\x01@\x01\x04self\xc1\0\0\xc9\0\x04\0\x20[me\
+thod]incoming-request.consume\x01J\x01i&\x01@\x01\x07headers\xc6\0\0\xcb\0\x04\0\
+\x1d[constructor]outgoing-request\x01L\x01h&\x01i/\x01j\x01\xce\0\0\x01@\x01\x04\
+self\xcd\0\0\xcf\0\x04\0\x1d[method]outgoing-request.body\x01P\x01@\x01\x04self\xcd\
+\0\0\x0b\x04\0\x1f[method]outgoing-request.method\x01Q\x01j\0\0\x01@\x02\x04self\
+\xcd\0\x06method\x0b\0\xd2\0\x04\0#[method]outgoing-request.set-method\x01S\x01@\
+\x01\x04self\xcd\0\0\x0e\x04\0([method]outgoing-request.path-with-query\x01T\x01\
+@\x02\x04self\xcd\0\x0fpath-with-query\x0e\0\xd2\0\x04\0,[method]outgoing-reques\
+t.set-path-with-query\x01U\x01@\x01\x04self\xcd\0\0\xc4\0\x04\0\x1f[method]outgo\
+ing-request.scheme\x01V\x01@\x02\x04self\xcd\0\x06scheme\xc4\0\0\xd2\0\x04\0#[me\
+thod]outgoing-request.set-scheme\x01W\x04\0\"[method]outgoing-request.authority\x01\
+T\x01@\x02\x04self\xcd\0\x09authority\x0e\0\xd2\0\x04\0&[method]outgoing-request\
+.set-authority\x01X\x01@\x01\x04self\xcd\0\0\xc6\0\x04\0\x20[method]outgoing-req\
+uest.headers\x01Y\x01i'\x01@\0\0\xda\0\x04\0\x1c[constructor]request-options\x01\
+[\x01h'\x01k\x01\x01@\x01\x04self\xdc\0\0\xdd\0\x04\0'[method]request-options.co\
+nnect-timeout\x01^\x01@\x02\x04self\xdc\0\x08duration\xdd\0\0\xd2\0\x04\0+[metho\
+d]request-options.set-connect-timeout\x01_\x04\0*[method]request-options.first-b\
+yte-timeout\x01^\x04\0.[method]request-options.set-first-byte-timeout\x01_\x04\0\
+-[method]request-options.between-bytes-timeout\x01^\x04\01[method]request-option\
+s.set-between-bytes-timeout\x01_\x01i(\x01i.\x01j\x01\xe1\0\x01\x1b\x01@\x02\x05\
+param\xe0\0\x08response\xe2\0\x01\0\x04\0\x1d[static]response-outparam.set\x01c\x01\
+h+\x01@\x01\x04self\xe4\0\0*\x04\0\x20[method]incoming-response.status\x01e\x01@\
+\x01\x04self\xe4\0\0\xc6\0\x04\0![method]incoming-response.headers\x01f\x01@\x01\
+\x04self\xe4\0\0\xc9\0\x04\0![method]incoming-response.consume\x01g\x01h,\x01i\x03\
+\x01j\x01\xe9\0\0\x01@\x01\x04self\xe8\0\0\xea\0\x04\0\x1c[method]incoming-body.\
+stream\x01k\x01i-\x01@\x01\x04this\xc8\0\0\xec\0\x04\0\x1c[static]incoming-body.\
+finish\x01m\x01h-\x01i\x09\x01@\x01\x04self\xee\0\0\xef\0\x04\0![method]future-t\
+railers.subscribe\x01p\x01i$\x01k\xf1\0\x01j\x01\xf2\0\x01\x1b\x01j\x01\xf3\0\0\x01\
+k\xf4\0\x01@\x01\x04self\xee\0\0\xf5\0\x04\0\x1b[method]future-trailers.get\x01v\
+\x01@\x01\x07headers\xc6\0\0\xe1\0\x04\0\x1e[constructor]outgoing-response\x01w\x01\
+h.\x01@\x01\x04self\xf8\0\0*\x04\0%[method]outgoing-response.status-code\x01y\x01\
+@\x02\x04self\xf8\0\x0bstatus-code*\0\xd2\0\x04\0)[method]outgoing-response.set-\
+status-code\x01z\x01@\x01\x04self\xf8\0\0\xc6\0\x04\0![method]outgoing-response.\
+headers\x01{\x01@\x01\x04self\xf8\0\0\xcf\0\x04\0\x1e[method]outgoing-response.b\
+ody\x01|\x01h/\x01i\x05\x01j\x01\xfe\0\0\x01@\x01\x04self\xfd\0\0\xff\0\x04\0\x1b\
+[method]outgoing-body.write\x01\x80\x01\x01j\0\x01\x1b\x01@\x02\x04this\xce\0\x08\
+trailers\xf2\0\0\x81\x01\x04\0\x1c[static]outgoing-body.finish\x01\x82\x01\x01h0\
+\x01@\x01\x04self\x83\x01\0\xef\0\x04\0*[method]future-incoming-response.subscri\
+be\x01\x84\x01\x01i+\x01j\x01\x85\x01\x01\x1b\x01j\x01\x86\x01\0\x01k\x87\x01\x01\
+@\x01\x04self\x83\x01\0\x88\x01\x04\0$[method]future-incoming-response.get\x01\x89\
+\x01\x01h\x07\x01k\x1b\x01@\x01\x03err\x8a\x01\0\x8b\x01\x04\0\x0fhttp-error-cod\
+e\x01\x8c\x01\x03\0\x15wasi:http/types@0.2.0\x05\x18\x02\x03\0\x0a\x10incoming-r\
+equest\x02\x03\0\x0a\x11response-outparam\x01B\x08\x02\x03\x02\x01\x19\x04\0\x10\
+incoming-request\x03\0\0\x02\x03\x02\x01\x1a\x04\0\x11response-outparam\x03\0\x02\
+\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\x06ha\
+ndle\x01\x06\x04\0\x20wasi:http/incoming-handler@0.2.0\x05\x1b\x04\0\x13pushit:h\
+ello-fn/app\x04\0\x0b\x09\x01\0\x03app\x03\0\0\0G\x09producers\x01\x0cprocessed-\
+by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

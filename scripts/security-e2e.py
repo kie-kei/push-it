@@ -102,10 +102,10 @@ def main():
         proc, port, log = start(data, True)
         try:
             assert request(port, "/api/apps/hello/secrets/KEY", "PUT", b"before")[0] == 204
-            manifest_a = "name: hello\ndomain: first\nenv:\n  VERSION: A\nsecrets: [KEY]\ncapabilities:\n  sql: [local]\n"
+            manifest_a = "name: hello\ndomain: first\nenv:\n  VERSION: A\nsecrets: [KEY]\ncapabilities:\n  kv: [local]\n"
             a = deploy(port, manifest_a)
             assert request(port, "/_fn/hello", host="first.localhost")[0] == 200
-            assert request(port, "/_fn/sql", host="first.localhost")[0] == 200
+            assert request(port, "/_fn/kv", host="first.localhost")[0] == 200
             b = deploy(port, "name: hello\ndomain: second\nenv:\n  VERSION: B\n")
             assert a != b
             assert request(port, "/config.js", host="second.localhost")[1] == b'window.__ENV__ = {"VERSION":"B"};\n'
@@ -114,22 +114,21 @@ def main():
             status, body = request(port, "/api/apps/hello/rollback", "POST", json.dumps({"revision": a}).encode())
             assert status == 200, (status, body)
             assert request(port, "/config.js", host="first.localhost")[1] == b'window.__ENV__ = {"VERSION":"A"};\n'
-            assert request(port, "/_fn/sql", host="first.localhost")[0] == 200
+            assert request(port, "/_fn/kv", host="first.localhost")[0] == 200
             assert request(port, "/", host="second.localhost")[0] == 404
             detail = json.loads(request(port, "/api/apps/hello")[1])
             assert detail["manifest"] == manifest_a
             # Exercise public version management through genuine HTTP and CLI.
             with sqlite3.connect(data / "pushit.db") as conn:
                 retained_secret = conn.execute("SELECT value_enc FROM secrets WHERE app='hello' AND key='KEY'").fetchone()[0]
-            with sqlite3.connect(data / "appdata" / "hello" / "local.db") as conn:
-                conn.execute("INSERT INTO hello (id,msg) VALUES (99999,'must survive version lifecycle')")
+            assert (data / "appdata" / "hello" / "local.kv").is_file()
             versions = json.loads(request(port, "/api/apps/hello/versions")[1])
             assert {v["id"] for v in versions} == {a, b}
             assert request(port, f"/api/apps/hello/versions/{a}", "DELETE")[0] == 409
             assert request(port, "/api/apps/hello/deactivate", "POST")[0] == 204
             assert request(port, "/api/apps/hello/deactivate", "POST")[0] == 204
             for host in ["first.localhost", "second.localhost"]:
-                for path in ["/", "/config.js", "/_fn/hello", "/_fn/sql"]:
+                for path in ["/", "/config.js", "/_fn/hello", "/_fn/kv"]:
                     assert request(port, path, host=host)[0] == 404, (host, path)
             assert json.loads(request(port, "/api/apps")[1])[0]["status"] == "inactive"
             cli = ROOT / "target/debug/pushit"
@@ -145,18 +144,16 @@ def main():
             assert request(port, "/config.js", host="second.localhost")[1] == b'window.__ENV__ = {"VERSION":"B"};\n'
             run_cli("activate", "hello", a)
             assert request(port, "/_fn/hello", host="first.localhost")[0] == 200
-            assert request(port, "/_fn/sql", host="first.localhost")[0] == 200
+            assert request(port, "/_fn/kv", host="first.localhost")[0] == 200
             run_cli("delete", "hello", a, "--yes", ok=False)
             run_cli("delete", "hello", b, "--yes")
             assert not (data / "apps" / "hello" / b).exists()
             assert (data / "apps" / "hello" / a / "app.wasm").is_file()
-            assert (data / "appdata" / "hello" / "local.db").is_file()
+            assert (data / "appdata" / "hello" / "local.kv").is_file()
             assert request(port, f"/api/apps/hello/versions/{b}/activate", "POST")[0] == 404
             assert request(port, f"/api/apps/hello/versions/{b}", "DELETE")[0] == 404
             with sqlite3.connect(data / "pushit.db") as conn:
                 assert conn.execute("SELECT value_enc FROM secrets WHERE app='hello' AND key='KEY'").fetchone()[0] == retained_secret
-            with sqlite3.connect(data / "appdata" / "hello" / "local.db") as conn:
-                assert conn.execute("SELECT msg FROM hello WHERE id=99999").fetchone()[0] == "must survive version lifecycle"
             run_cli("deactivate", "hello")
             assert request(port, "/", host="first.localhost")[0] == 404
             run_cli("activate", "hello", a)
