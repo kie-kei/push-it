@@ -113,9 +113,12 @@ def main():
         assert text.count(marker) == 1, "example handler changed; update fixture insertion point"
         source.write_text(text.replace(marker, marker + GUEST))
         # cargo-component regenerates bindings.rs for the patched world.
-        subprocess.run(["cargo", "component", "build", "--release",
+        # cwd=ROOT matters: CI pins the toolchain via a rustup override on the
+        # checkout dir, and building from /tmp would lose the wasm32 targets.
+        subprocess.run(["cargo", "component", "build", "--manifest-path",
+                        str(fixture / "Cargo.toml"), "--release",
                         "--target", "wasm32-wasip2", "--locked", "--offline"],
-                       cwd=fixture, check=True,
+                       cwd=ROOT, check=True,
                        env={**os.environ, "CARGO_TARGET_DIR": str(root / "target")}, timeout=300)
         smoke.WASM = root / "target/wasm32-wasip2/release/hello_fn.wasm"
         data = root / "data"
