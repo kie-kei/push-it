@@ -14,6 +14,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use pushit_controller::log_host::LogCtx;
 use pushit_controller::logs::LogStore;
+use pushit_controller::manifest::{HostFilter, HttpOut};
 use pushit_controller::runtime::{HostCaps, Runtime};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -38,7 +39,7 @@ pub struct DevArgs {
     /// DSN for a sql connection: --dsn name='postgres://…' (repeatable).
     #[arg(long = "dsn")]
     pub dsn: Vec<String>,
-    /// Allow outgoing HTTP (same as capabilities.http_out on the platform).
+    /// Allow all outgoing HTTP, overriding the manifest allowlist.
     #[arg(long)]
     pub http_out: bool,
 }
@@ -139,7 +140,13 @@ async fn run_async(args: &DevArgs) -> Result<()> {
     }
 
     let runtime = Runtime::new(Duration::from_secs(30))?;
-    let http_out = args.http_out || manifest.http_out();
+    // Same policy as the platform: the manifest allowlist, unless --http-out
+    // explicitly widens it to all hosts for local experimentation.
+    let http_out = if args.http_out {
+        HttpOut::Allowed(HostFilter::all())
+    } else {
+        manifest.http_out_policy()
+    };
 
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
     let listener = TcpListener::bind(addr).await?;
@@ -165,7 +172,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
         let blob_allowed = manifest.capabilities.blobstore.clone();
         let app_name = manifest.name.clone();
         let data_dir = data_dir.clone();
-        let http_out = http_out;
+        let http_out = http_out.clone();
         let runtime = runtime.clone();
         tokio::spawn(async move {
             let service = service_fn(move |req: Request<Incoming>| {
@@ -180,6 +187,7 @@ async fn run_async(args: &DevArgs) -> Result<()> {
                 let blob_allowed = blob_allowed.clone();
                 let app_name = app_name.clone();
                 let data_dir = data_dir.clone();
+                let http_out = http_out.clone();
                 async move {
                     handle(
                         &runtime,
@@ -218,7 +226,7 @@ async fn handle(
     sql_allowed: Vec<String>,
     kv_allowed: Vec<String>,
     blob_allowed: Vec<String>,
-    http_out: bool,
+    http_out: HttpOut,
     logs: Arc<LogStore>,
     dist: Option<PathBuf>,
 ) -> Result<Response<FullBody>, hyper::Error> {
@@ -248,7 +256,7 @@ async fn handle(
         let mut log_rx = logs.subscribe(app_name);
         let caps = HostCaps {
             artifact_pin: None,
-            allow_http_out: http_out,
+            http_out,
             sql_allowed,
             sql_dsns: dsns,
             kv_allowed,
