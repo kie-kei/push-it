@@ -67,7 +67,7 @@ secrets:              # значения через CLI/UI, в git — толь�
   - CLICKHOUSE_TOKEN
   - S3_SECRET_KEY
 capabilities:         # какие WASI-интерфейсы выдать компоненту
-  http_out: ["clickhouse.internal", "s3.internal"]   # allowlist хостов, если реализуем фильтр
+  http_out: ["clickhouse.internal", "s3.internal"]   # allowlist хостов; '*' — все
   env: ["CLICKHOUSE_URL", "CLICKHOUSE_TOKEN"]
 build:
   fn: cargo component build --release
@@ -134,7 +134,7 @@ pushit deploy (на машине разработчика или в CI):
 
 | Интерфейс | Статус WASI | Наша реализация | Когда |
 |---|---|---|---|
-| `wasi:http` (in/out) | Phase 3, стабилен | wasmtime из коробки + allowlist хостов в outgoing-handler | **MVP** |
+| `wasi:http` (in/out) | Phase 3, стабилен | **Реализовано**: wasmtime + host-фильтр в outgoing-handler — `capabilities.http_out` как allowlist authority-хостов (точный хост, `*.suffix`, `'*`; порт игнорируется, сравнение без учёта регистра) | **Done** |
 | env/secrets через хост | — | env подаётся при instantiate, секреты из SQLite | **MVP** |
 | `wasi:blobstore` | Phase 1 (draft, `0.2.0-draft`) | **Реализовано**: opendal (`services-s3`, `services-fs`), `capabilities.blobstore: [name]` → `blobstores.yaml`, whole-object буферы в MVP | **Done** |
 | `wasi:keyvalue` | Phase 1 (draft, `0.2.0-draft`, store) | **Реализовано**: встроенная NoSQL-БД приложения — embedded redb, один файл `$PUSHIT_DATA/appdata/<app>/local.kv`, `capabilities.kv: [local]`, bucket `get/set/delete/exists/list-keys` (значения — байты, JSON по конвенции); переживает ревизии/rollback. Atomics/batch/watch — по потребности | **Done** |
@@ -175,11 +175,11 @@ pushit deploy (на машине разработчика или в CI):
 
 Входит: деплой артефактов через CLI (`pushit deploy`), роутинг по `Host`, instantiate-per-request, env/secrets, SQL/blobstore/logging host-интерфейсы, логи в per-app файл, `hub.*` со списком приложений, Keycloak-логин, wildcard-субдомены.
 
-Не входит: allowlist в `http_out` (пока «всё или ничего»), rollback-кнопки в хабе (rollback только через CLI), тёплый пул, cron, TLS через ACME (внутренний CA или HTTP).
+Не входит: rollback-кнопки в хабе (rollback только через CLI), тёплый пул, cron, TLS через ACME (внутренний CA или HTTP).
 
 ## Открытые вопросы
 
-- Гранулярность `capabilities.http_out`: allowlist хостов — фильтровать в host-функции outgoing-handler (реализуемо: хост видит URL запроса до выполнения).
+- ~~Гранулярность `capabilities.http_out`~~ — реализовано: host-фильтр в `send_request` outgoing-handler, хост виден до выполнения запроса.
 - Тёплые инстансы vs instantiate-per-request: начать с instantiate-per-request (проще, ~1–5мс), тёплый пул — при появлении latency-проблем.
 - Fuel/limit: значения по умолчанию для прерывания зависших вызовов; таймаут ответа.
 - Cron/фоновые джобы: манифест `cron:` → контроллер дёргает handler по расписанию. Дешёвое расширение позже.

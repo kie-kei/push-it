@@ -1001,7 +1001,7 @@ async fn call_fn(
     };
     let caps = crate::runtime::HostCaps {
         artifact_pin: Some(artifact_pin),
-        allow_http_out: manifest.http_out(),
+        http_out: manifest.http_out_policy(),
         sql_allowed,
         sql_dsns,
         kv_allowed: manifest.capabilities.kv.clone(),

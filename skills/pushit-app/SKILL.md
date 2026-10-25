@@ -210,7 +210,7 @@ env:                             # non-secret config; reaches fn as env vars
 secrets:                         # names only — values are set via `pushit secret set`
   - API_TOKEN                    # deploy FAILS if a named secret is not set
 capabilities:                    # what the component is allowed to import/use
-  http_out: ["api.example.com"]  # presence grants outgoing HTTP (MVP: unrestricted)
+  http_out: ["api.example.com"]  # outgoing-HTTP allowlist: exact hosts, '*.suffix', or '*' for all
   env: [API_TOKEN]
   kv: [local]                    # 'local' = built-in per-app key-value store (NoSQL)
   sql: [db]                      # logical names, bound to secret sources at deploy (root manifest sql:)
@@ -237,7 +237,7 @@ Rules that bite when violated:
 | `capabilities.sql: [name]` | `wasi:sql` `connection.open(name)`, `statement.prepare`, `query`, `exec` | Real DB access (postgres/mysql/sqlite via sqlx, ClickHouse via HTTP). Names are logical and bound at deploy time in the root manifest (`sql: {name: secret:<app-secret-key> \| platform:<global-secret-name>}`). Credentials never reach the component. For the built-in store use `kv`, not sql |
 | `capabilities.blobstore: [name]` | `wasi:blobstore` `get-container`, `get-data`, `write-data`, `list-objects`… | Object storage via opendal (s3/fs). Streams objects — fine for large files |
 | (always available) | `wasi:logging` `log(level, ctx, msg)` | Structured lines into `pushit logs <app>` |
-| `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Raw outgoing HTTP — prefer kv/sql/blobstore interfaces when they cover the service |
+| `capabilities.http_out: [...]` | `wasi:http` outgoing-handler | Outgoing HTTP restricted to the listed hosts (exact match or `*.suffix`; port ignored; `'*'` = all). Denied requests fail with `http-request-denied`. Prefer kv/sql/blobstore interfaces when they cover the service |
 
 If a component imports an interface NOT granted in `capabilities`, the request fails — check the manifest first when a call errors with "not granted".
 
