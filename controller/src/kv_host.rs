@@ -127,7 +127,9 @@ impl bindings::wasi::keyvalue::store::HostBucket for ComponentCtx {
             .map_err(e2e)?
             .open_table(TABLE)
             .map_err(e2e)?;
-        Ok(t.get(key.as_str()).map_err(e2e)?.map(|v| v.value().to_vec()))
+        Ok(t.get(key.as_str())
+            .map_err(e2e)?
+            .map(|v| v.value().to_vec()))
     }
 
     async fn set(&mut self, b: Resource<Bucket>, key: String, value: Vec<u8>) -> Result<(), Error> {
