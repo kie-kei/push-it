@@ -40,6 +40,8 @@ pub struct Revision {
     /// None for historical revisions whose configuration cannot be recovered.
     pub manifest: Option<String>,
     pub domain: Option<String>,
+    /// Content digest of the deployed artifacts; None for legacy rows.
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +103,18 @@ impl Db {
                  WHERE active=1;",
             )?;
         }
+        let has_digest = {
+            let mut st = tx.prepare("PRAGMA table_info(revisions)")?;
+            let names = st
+                .query_map([], |r| r.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            names.iter().any(|name| name == "digest")
+        };
+        if !has_digest {
+            // Digests of already-deployed artifacts are recomputable from the
+            // unpacked revision directories; fill them in opportunistically.
+            tx.execute_batch("ALTER TABLE revisions ADD COLUMN digest TEXT;")?;
+        }
         tx.execute_batch(
             "CREATE UNIQUE INDEX IF NOT EXISTS one_active_revision_per_app
              ON revisions(app) WHERE active=1;
@@ -116,6 +130,36 @@ impl Db {
             conn: Arc::new(Mutex::new(conn)),
             artifacts: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Best-effort digest backfill for legacy revisions: computes
+    /// `artifact_digest` from each stored artifact directory that still has
+    /// its app.wasm. Missing artifacts keep digest NULL (unknown).
+    pub fn backfill_digests(&self) {
+        let rows: Vec<(String, String, String)> = match self
+            .c()
+            .prepare("SELECT id, app, artifact_dir FROM revisions WHERE digest IS NULL")
+        {
+            Ok(mut st) => st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        for (id, app, dir) in rows {
+            let wasm = std::path::Path::new(&dir).join("app.wasm");
+            if !wasm.is_file() {
+                continue;
+            }
+            let dist = std::path::Path::new(&dir).join("dist");
+            let dist = dist.is_dir().then_some(dist);
+            if let Ok(digest) = crate::digest::artifact_digest(&wasm, dist.as_deref()) {
+                let _ = self.c().execute(
+                    "UPDATE revisions SET digest=?1 WHERE app=?2 AND id=?3",
+                    params![digest, app, id],
+                );
+            }
+        }
     }
 
     fn artifact_lock(
@@ -239,6 +283,7 @@ impl Db {
 
     /// Publish the artifact and its complete configuration in one transaction.
     /// Callers must finish and validate the immutable artifact directory first.
+    /// Legacy convenience: no artifact digest recorded (see `backfill_digests`).
     pub fn deploy_revision(
         &self,
         app: &str,
@@ -246,6 +291,21 @@ impl Db {
         dir: &str,
         domain: &str,
         manifest: &str,
+    ) -> Result<()> {
+        self.deploy_revision_with_digest(app, id, dir, domain, manifest, None)
+    }
+
+    /// Same, but records the artifact content digest (`digest.rs`) for later
+    /// `plan --artifacts` comparisons; pass the digest computed from the
+    /// unpacked revision directory before calling this.
+    pub fn deploy_revision_with_digest(
+        &self,
+        app: &str,
+        id: &str,
+        dir: &str,
+        domain: &str,
+        manifest: &str,
+        digest: Option<&str>,
     ) -> Result<()> {
         let mut conn = self.c();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -255,9 +315,9 @@ impl Db {
             params![app, domain, manifest],
         )?;
         tx.execute(
-            "INSERT INTO revisions(id,app,artifact_dir,manifest,domain,active)
-             VALUES(?1,?2,?3,?4,?5,0)",
-            params![id, app, dir, manifest, domain],
+            "INSERT INTO revisions(id,app,artifact_dir,manifest,domain,digest,active)
+             VALUES(?1,?2,?3,?4,?5,?6,0)",
+            params![id, app, dir, manifest, domain, digest],
         )?;
         Self::activate_in(&tx, app, id)?;
         tx.commit()?;
@@ -367,7 +427,7 @@ impl Db {
             .c()
             .query_row(
                 "SELECT a.name,a.domain,a.manifest,a.created_at,
-                    r.id,r.app,r.artifact_dir,r.created_at,r.active,r.manifest,r.domain
+                    r.id,r.app,r.artifact_dir,r.created_at,r.active,r.manifest,r.domain,r.digest
              FROM apps a JOIN revisions r ON r.app=a.name AND r.active=1
              WHERE a.domain=?1 COLLATE NOCASE LIMIT 1",
                 params![domain],
@@ -387,6 +447,7 @@ impl Db {
                             active: r.get::<_, i32>(8)? != 0,
                             manifest: r.get(9)?,
                             domain: r.get(10)?,
+                            digest: r.get(11)?,
                         },
                     ))
                 },
@@ -410,7 +471,7 @@ impl Db {
     pub fn revisions(&self, app: &str) -> Result<Vec<Revision>> {
         let conn = self.c();
         let mut st = conn.prepare(
-            "SELECT id,app,artifact_dir,created_at,active,manifest,domain FROM revisions
+            "SELECT id,app,artifact_dir,created_at,active,manifest,domain,digest FROM revisions
              WHERE app=?1 ORDER BY created_at DESC, id DESC",
         )?;
         let rows = st
@@ -423,6 +484,7 @@ impl Db {
                     active: r.get::<_, i32>(4)? != 0,
                     manifest: r.get(5)?,
                     domain: r.get(6)?,
+                    digest: r.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -433,7 +495,7 @@ impl Db {
         Ok(self
             .c()
             .query_row(
-                "SELECT id,app,artifact_dir,created_at,active,manifest,domain FROM revisions
+                "SELECT id,app,artifact_dir,created_at,active,manifest,domain,digest FROM revisions
                  WHERE app=?1 AND active=1",
                 params![app],
                 |r| {
@@ -445,6 +507,7 @@ impl Db {
                         active: true,
                         manifest: r.get(5)?,
                         domain: r.get(6)?,
+                        digest: r.get(7)?,
                     })
                 },
             )
@@ -453,10 +516,11 @@ impl Db {
 
     pub fn revision(&self, app: &str, id: &str) -> Result<Option<Revision>> {
         Ok(self.c().query_row(
-            "SELECT id,app,artifact_dir,created_at,active,manifest,domain FROM revisions WHERE app=?1 AND id=?2",
+            "SELECT id,app,artifact_dir,created_at,active,manifest,domain,digest FROM revisions WHERE app=?1 AND id=?2",
             params![app,id], |r| Ok(Revision {
                 id:r.get(0)?,app:r.get(1)?,artifact_dir:r.get(2)?,created_at:r.get(3)?,
                 active:r.get::<_,i32>(4)? != 0,manifest:r.get(5)?,domain:r.get(6)?,
+                digest:r.get(7)?,
             }),
         ).optional()?)
     }
