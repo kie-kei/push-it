@@ -57,3 +57,5 @@ are pinned separately by `rust-toolchain.toml`. The smoke also asserts identical
 active-version digests on both instances. Legacy revisions are backfilled at
 startup when artifacts remain readable; unavailable artifacts leave a null digest,
 not evidence of a match.
+Local artifact selection follows deployment: explicit `entry`/`build.ui_dist`,
+otherwise discovered WASM and the app's `dist/` directory.

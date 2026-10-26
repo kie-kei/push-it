@@ -11,6 +11,8 @@ fn artifact_plan_keeps_stdout_json_and_compares_active_content() {
     fs::create_dir_all(root.join("repo")).unwrap();
     let repo = root.join("repo");
     fs::write(repo.join("source.wasm"), b"artifact").unwrap();
+    fs::create_dir_all(repo.join("dist")).unwrap();
+    fs::write(repo.join("dist/index.html"), b"artifact UI").unwrap();
     fs::write(repo.join("pushit.yaml"), "name: app\nentry: app.wasm\nenv: {}\nsecrets: []\nbuild:\n  fn: echo build-output; cp source.wasm app.wasm\n").unwrap();
     for args in [
         vec!["init"],
@@ -41,8 +43,11 @@ fn artifact_plan_keeps_stdout_json_and_compares_active_content() {
         ),
     )
     .unwrap();
-    let digest =
-        pushit_controller::digest::artifact_digest(&repo.join("source.wasm"), None).unwrap();
+    let digest = pushit_controller::digest::artifact_digest(
+        &repo.join("source.wasm"),
+        Some(&repo.join("dist")),
+    )
+    .unwrap();
     for (active, expected) in [(true, "up-to-date"), (false, "drift")] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();

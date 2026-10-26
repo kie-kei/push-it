@@ -1123,11 +1123,13 @@ fn active_artifact_matches(detail: &serde_json::Value, digest: &str) -> bool {
 }
 fn local_artifact_digest(manifest: &serde_yaml::Value, base: &Path) -> Result<String> {
     run_build_steps_with_output(manifest, base, true)?;
-    let wasm = manifest_path(manifest, "entry", base)
-        .filter(|p| p.is_file())
-        .or_else(|| find_wasm(base).ok())
-        .context("no built wasm artifact")?;
-    let dist = manifest_path(manifest, "ui_dist", base).filter(|p| p.is_dir());
+    let wasm = match manifest_path(manifest, "entry", base) {
+        Some(path) => path,
+        None => find_wasm(base)?,
+    };
+    let dist = manifest_path(manifest, "ui_dist", base)
+        .or_else(|| Some(base.join("dist")))
+        .filter(|p| p.is_dir());
     pushit_controller::digest::artifact_digest(&wasm, dist.as_deref())
 }
 
