@@ -45,7 +45,7 @@ fn dist_files(dist: &Path) -> Result<Vec<(String, PathBuf)>> {
             // The controller rewrites dist/config.js at deploy time from
             // manifest env; a local stale copy must not look like code drift.
             if path.is_file() {
-                if !(rel == "config.js") {
+                if rel != "config.js" {
                     files.push((rel, path));
                 }
             } else if path.is_dir() {

@@ -38,7 +38,7 @@ an existing owner. See [local setup](docs/standalone-local-auth.md) or the
 - `manifest` — `pushit.yaml` text
 - `archive` — tar.gz containing `app.wasm` (component, exports `wasi:http/incoming-handler@0.2`) and optional `dist/` (static UI)
 
-200 → `{"app":"name","revision":"<id>","domain":"<name>.<base-domain>"}`
+200 → `{"app":"name","revision":"<id>","domain":"<name>.<base-domain>","digest":"sha256:<hex>"}`
 400 → validation error (bad manifest, missing export, unmet secrets)
 
 ## Secrets
@@ -65,7 +65,7 @@ Version IDs are the existing opaque revision IDs, not Git SHAs. No migration or
 new identifier is required. Every successful deploy immediately activates its new
 version. An app has at most one active version, and may have none.
 
-- `GET /api/apps/{name}/versions` → `[{"id":"<id>","created_at":"...","active":true}]`, newest first, ties by ID descending. Missing app: 404.
+- `GET /api/apps/{name}/versions` → `[{"id":"<id>","created_at":"...","active":true,"digest":"sha256:<hex>"}]`, newest first, ties by ID descending. Missing app: 404. App detail's `revisions` also includes `digest`; null means unknown legacy artifacts.
 - `POST /api/apps/{name}/versions/{id}/activate` → `{"app":"name","version":"<id>"}`. Atomically switches code, static UI, manifest/env/capabilities and domain to the existing immutable snapshot. Missing version: 404; missing/legacy manifest, artifact or required secrets: 400, leaving the prior active version unchanged.
 - `POST /api/apps/{name}/deactivate` → 204 (idempotent); missing app: 404. With no active version, functions **and** UI/static/config routes return 404. All versions remain available for later activation.
 - `DELETE /api/apps/{name}/versions/{id}` → 204. Deletes only this inactive version and its artifacts/cache entries. Active version: 409; missing version: 404. If an in-flight request still uses an inactive version, returns 409: retry after the request finishes. Unrelated apps/versions remain available. Legacy inactive versions without manifest snapshots can also be deleted.
@@ -84,6 +84,21 @@ references**, not secret values or database contents. Older versions must be
 compatible with the current data/schema. The existing rollback API and revision
 history remain compatible; rollback without a target still selects the newest
 inactive version with a known snapshot.
+
+The artifact digest covers WASM and sorted `dist/` file paths/content, excluding
+generated `dist/config.js`; it does not cover config, secrets or persistent data.
+
+### Scheduled component requests
+
+Manifest `cron:` entries declare `{name, schedule, path?}`; schedules have five
+fields in UTC and `path` defaults to `/_cron/<name>`. The controller invokes the
+active component directly with GET, the same env/secrets/capabilities as HTTP,
+`PUSHIT_CRON=<name>`, `x-pushit-cron: <name>` and the synthetic `cron` identity.
+Deploy/activation/deactivation take effect within one scheduler tick (30s by
+default; `PUSHIT_CRON_TICK_SECS` overrides it). Runs do not overlap for the same
+app/job, missed runs are skipped, and controller downtime is not replayed.
+Normal runtime timeout applies; results and guest output go to app logs.
+See [cron](docs/cron.md) for the complete contract.
 
 `DELETE /api/apps/{name}` — removes app, revisions, route
 

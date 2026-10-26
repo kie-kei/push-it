@@ -130,6 +130,17 @@ def main():
             assert json.loads(b.cli("list")) == []
             b.cli("secret", "set", "hello", f"{SECRET}=synthetic-b-only")
             b.cli(*deploy)
+            artifact_digests = []
+            for instance in (a, b):
+                status, body = instance.request("/api/apps/hello/versions")
+                assert status == 200, body
+                versions = json.loads(body)
+                active = next(version for version in versions if version["active"])
+                assert active["digest"].startswith("sha256:"), active
+                detail = json.loads(instance.cli("status", "hello"))
+                assert detail["revisions"][0]["digest"] == active["digest"]
+                artifact_digests.append(active["digest"])
+            assert artifact_digests[0] == artifact_digests[1], artifact_digests
             expected_config = b'window.__ENV__ = {"GREETING":"portable-hello"};\n'
             for instance, other in ((a, b), (b, a)):
                 detail = json.loads(instance.cli("status", "hello"))

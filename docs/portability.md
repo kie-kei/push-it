@@ -47,4 +47,13 @@ This establishes a bounded **two-local-instance isolation and artifact/config
 portability regression**, not the full roadmap acceptance criterion of a second
 host. It does not verify two VMs, cross-OS/runtime compatibility, source rebuild
 reproducibility, production TLS/OIDC/Keycloak, data migration or backup/restore.
-`plan` is still a configuration diff, not evidence of artifact equivalence.
+`pushit plan --artifacts` rebuilds local artifacts and compares their digest with
+the active revision (`ARTIFACT-MATCH` / `ARTIFACT-DRIFT`); plain `plan` remains a
+configuration diff. Deploy responses, app detail revision history and the versions
+API expose `digest: "sha256:..."`. The digest covers `app.wasm` and sorted relative
+paths/content of files under `dist/`, excluding controller-generated `dist/config.js`.
+It excludes manifests, env, secrets, app data and toolchain versions; the latter
+are pinned separately by `rust-toolchain.toml`. The smoke also asserts identical
+active-version digests on both instances. Legacy revisions are backfilled at
+startup when artifacts remain readable; unavailable artifacts leave a null digest,
+not evidence of a match.

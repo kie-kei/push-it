@@ -240,7 +240,7 @@ async fn api_versions(
         .revisions(&name)
         .map_err(err500)?
         .into_iter()
-        .map(|r| serde_json::json!({"id": r.id, "created_at": r.created_at, "active": r.active}))
+        .map(|r| serde_json::json!({"id": r.id, "created_at": r.created_at, "active": r.active, "digest": r.digest}))
         .collect();
     Ok(axum::Json(versions).into_response())
 }
@@ -387,9 +387,16 @@ pub fn deploy_inner(
         );
         std::fs::write(dist.join("config.js"), cfg_js)?;
     }
+    let digest = crate::digest::artifact_digest(
+        &dir.join("app.wasm"),
+        dist.is_dir().then_some(dist.as_path()),
+    )
+    .inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&dir);
+    })?;
 
     let domain = format!("{}.{}", manifest.route_name(), s.cfg.base_domain);
-    s.db.deploy_revision(name, &rev, &dir.to_string_lossy(), &domain, manifest_yaml)
+    s.db.deploy_revision_with_digest(name, &rev, &dir.to_string_lossy(), &domain, manifest_yaml, Some(&digest))
         .inspect_err(|_| {
             let _ = std::fs::remove_dir_all(&dir);
         })?;
@@ -401,7 +408,7 @@ pub fn deploy_inner(
         tracing::warn!(%error, "revision committed but deployment log could not be written");
     }
     Ok(serde_json::json!({
-        "app": name, "revision": rev, "domain": domain,
+        "app": name, "revision": rev, "domain": domain, "digest": digest,
     }))
 }
 
