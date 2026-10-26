@@ -396,10 +396,17 @@ pub fn deploy_inner(
     })?;
 
     let domain = format!("{}.{}", manifest.route_name(), s.cfg.base_domain);
-    s.db.deploy_revision_with_digest(name, &rev, &dir.to_string_lossy(), &domain, manifest_yaml, Some(&digest))
-        .inspect_err(|_| {
-            let _ = std::fs::remove_dir_all(&dir);
-        })?;
+    s.db.deploy_revision_with_digest(
+        name,
+        &rev,
+        &dir.to_string_lossy(),
+        &domain,
+        manifest_yaml,
+        Some(&digest),
+    )
+    .inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&dir);
+    })?;
 
     if let Err(error) = s
         .logs
@@ -923,9 +930,12 @@ pub(crate) fn resolve_call_env_caps(
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     for k in &manifest.secrets {
-        let enc = s.db.get_secret_enc(&app.name, k)?
-            .with_context(|| format!("missing app secret '{k}'"))?;
-        let value = s.secrets.decrypt(&enc)
+        let enc =
+            s.db.get_secret_enc(&app.name, k)?
+                .with_context(|| format!("missing app secret '{k}'"))?;
+        let value = s
+            .secrets
+            .decrypt(&enc)
             .with_context(|| format!("decrypt app secret '{k}'"))?;
         env.push((k.clone(), String::from_utf8_lossy(&value).into_owned()));
     }

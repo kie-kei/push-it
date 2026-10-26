@@ -667,7 +667,8 @@ mod tests {
         assert!(db.active_apps().unwrap().is_empty());
         deploy(&db, "r1");
         deploy(&db, "r2");
-        db.deploy_revision("b", "b1", "/x/b1", "b.localhost", "name: b").unwrap();
+        db.deploy_revision("b", "b1", "/x/b1", "b.localhost", "name: b")
+            .unwrap();
         let apps = db.active_apps().unwrap();
         assert_eq!(apps.len(), 2);
         assert_eq!(apps[0].0.name, "a");

@@ -53,8 +53,9 @@ grants as an ordinary function request, plus:
   `x-user-email: cron@pushit.local`.
 
 The usual runtime handler timeout (30 seconds) applies. The response body
-is discarded. A failed run is logged,
-not retried; later scheduled occurrences remain eligible.
+is discarded. A failed run is logged, not retried. A timeout does not release
+the app/job's in-flight guard until the underlying guest actually stops;
+later occurrences are skipped while that guest is still alive.
 
 Guest stdout/stderr and `wasi:logging` output go to the app's normal log.
 Each run also appends a result line:

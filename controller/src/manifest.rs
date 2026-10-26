@@ -265,17 +265,18 @@ mod tests {
 
     #[test]
     fn parses_cron_and_defaults_path() {
-        let m = Manifest::parse(
-            "name: a\ncron:\n  - name: report\n    schedule: '0 9 * * *'\n",
-        )
-        .unwrap();
+        let m = Manifest::parse("name: a\ncron:\n  - name: report\n    schedule: '0 9 * * *'\n")
+            .unwrap();
         assert_eq!(m.cron[0].path, "/_cron/report");
         let m = Manifest::parse(
             "name: a\ncron:\n  - name: auth\n    schedule: '* * * * *'\n    path: /_fn/log\n",
         )
         .unwrap();
         assert_eq!(m.cron[0].path, "/_fn/log");
-        assert!(Manifest::parse("name: a\ncron: []\n").unwrap().cron.is_empty());
+        assert!(Manifest::parse("name: a\ncron: []\n")
+            .unwrap()
+            .cron
+            .is_empty());
     }
 
     #[test]
@@ -292,7 +293,10 @@ mod tests {
             "- name: tick",
             "- schedule: '* * * * *'",
         ] {
-            assert!(Manifest::parse(&format!("name: a\ncron:\n  {entry}\n")).is_err(), "{entry}");
+            assert!(
+                Manifest::parse(&format!("name: a\ncron:\n  {entry}\n")).is_err(),
+                "{entry}"
+            );
         }
         assert!(Manifest::parse("name: a\ncron: {name: tick}\n").is_err());
     }

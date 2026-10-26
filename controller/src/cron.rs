@@ -22,18 +22,33 @@ pub(crate) struct CronSchedule {
 impl CronSchedule {
     pub(crate) fn parse(expression: &str) -> Result<Self> {
         let fields: Vec<_> = expression.split_whitespace().collect();
-        anyhow::ensure!(fields.len() == 5, "expected five fields: minute hour day-of-month month day-of-week");
+        anyhow::ensure!(
+            fields.len() == 5,
+            "expected five fields: minute hour day-of-month month day-of-week"
+        );
         anyhow::ensure!(!expression.contains('?'), "use '*' for unrestricted fields");
         let weekday = weekdays(fields[4])?;
         // The crate uses Sunday=1 and intersects DOM/DOW; Unix cron uses
         // Sunday=0 (or 7) and unions the two when both are restricted.
         let (primary, extra) = if !fields[2].starts_with('*') && !fields[4].starts_with('*') {
             (
-                format!("0 {} {} {} {} *", fields[0], fields[1], fields[2], fields[3]),
-                Some(format!("0 {} {} * {} {}", fields[0], fields[1], fields[3], weekday)),
+                format!(
+                    "0 {} {} {} {} *",
+                    fields[0], fields[1], fields[2], fields[3]
+                ),
+                Some(format!(
+                    "0 {} {} * {} {}",
+                    fields[0], fields[1], fields[3], weekday
+                )),
             )
         } else {
-            (format!("0 {} {} {} {} {}", fields[0], fields[1], fields[2], fields[3], weekday), None)
+            (
+                format!(
+                    "0 {} {} {} {} {}",
+                    fields[0], fields[1], fields[2], fields[3], weekday
+                ),
+                None,
+            )
         };
         Ok(Self {
             primary: Schedule::from_str(&primary)?,
@@ -144,7 +159,11 @@ fn tick_seconds(value: Option<&str>) -> u64 {
     value
         .and_then(|v| v.parse().ok())
         .filter(|v| *v > 0)
-        .filter(|v| tokio::time::Instant::now().checked_add(Duration::from_secs(*v)).is_some())
+        .filter(|v| {
+            tokio::time::Instant::now()
+                .checked_add(Duration::from_secs(*v))
+                .is_some()
+        })
         .unwrap_or(30)
 }
 
@@ -237,17 +256,24 @@ async fn invoke(s: &AppState, app: &App, revision: &Revision, job: &Job) -> Resu
             .header("x-user-email", "cron@pushit.local")
             .header("x-pushit-cron", &job.name)
             .body(Full::new(Bytes::new()))?;
-        let mut res = s.runtime.call(
-            std::path::Path::new(&revision.artifact_dir),
-            &app.name,
-            &s.cfg.data_dir,
-            env,
-            caps,
-            request,
-        ).await?;
+        let mut res = s
+            .runtime
+            .call(
+                std::path::Path::new(&revision.artifact_dir),
+                &app.name,
+                &s.cfg.data_dir,
+                env,
+                caps,
+                request,
+            )
+            .await?;
         s.logs.append(&app.name, &res.stdout)?;
         s.logs.append(&app.name, &res.stderr)?;
-        let status = res.response.as_ref().map(|r| r.status().as_u16()).unwrap_or(204);
+        let status = res
+            .response
+            .as_ref()
+            .map(|r| r.status().as_u16())
+            .unwrap_or(204);
         if let Some(response) = res.response.take() {
             let mut body = response.into_body();
             tokio::time::timeout(s.runtime.timeout, async {
@@ -255,15 +281,21 @@ async fn invoke(s: &AppState, app: &App, revision: &Revision, job: &Job) -> Resu
                     frame.map_err(|e| anyhow::anyhow!("cron response body: {e:?}"))?;
                 }
                 anyhow::Ok(())
-            }).await.context("cron response body timed out")??;
+            })
+            .await
+            .context("cron response body timed out")??;
         }
         Ok::<_, anyhow::Error>(status)
-    }.await;
+    }
+    .await;
     let summary = match &result {
         Ok(status) => status.to_string(),
         Err(error) => format!("error: {error:#}").replace(['\r', '\n'], " "),
     };
-    let logged = s.logs.append(&app.name, format!("cron '{}' GET {} -> {}\n", job.name, job.path, summary).as_bytes());
+    let logged = s.logs.append(
+        &app.name,
+        format!("cron '{}' GET {} -> {}\n", job.name, job.path, summary).as_bytes(),
+    );
     // The runtime may return an error before its guest task has stopped.
     // Keep the job in flight until that task drops its completion sender.
     let _ = done.await;
@@ -277,7 +309,8 @@ mod tests {
     use chrono::TimeZone;
 
     fn clock(minute: u32, second: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, 26, 9, minute, second).unwrap()
+        Utc.with_ymd_and_hms(2026, 10, 26, 9, minute, second)
+            .unwrap()
     }
 
     fn job() -> Job {
@@ -325,7 +358,9 @@ mod tests {
         scheduler.tick(clock(0, 0), vec![job()], |_| {});
         let mut changed = job();
         changed.path = "/_cron/new".into();
-        scheduler.tick(clock(1, 0), vec![changed], |_| panic!("changed job caught up"));
+        scheduler.tick(clock(1, 0), vec![changed], |_| {
+            panic!("changed job caught up")
+        });
         assert_eq!(scheduler.jobs[&job().key()].next_due, Some(clock(2, 0)));
         scheduler.tick(clock(2, 0), vec![], |_| panic!("removed job fired"));
         assert!(scheduler.jobs.is_empty());
@@ -341,11 +376,15 @@ mod tests {
         scheduler.tick(clock(1, 0), vec![job()], |j| runs.push(j.key()));
         scheduler.tick(clock(2, 0), vec![], |_| panic!("removed job fired"));
         scheduler.tick(clock(3, 0), vec![job()], |_| panic!("new job caught up"));
-        scheduler.tick(clock(4, 0), vec![job()], |_| panic!("re-added job overlapped"));
+        scheduler.tick(clock(4, 0), vec![job()], |_| {
+            panic!("re-added job overlapped")
+        });
         let mut changed = job();
         changed.path = "/_cron/replacement".into();
         scheduler.tick(clock(4, 1), vec![changed.clone()], |_| {});
-        scheduler.tick(clock(5, 0), vec![changed.clone()], |_| panic!("replacement overlapped"));
+        scheduler.tick(clock(5, 0), vec![changed.clone()], |_| {
+            panic!("replacement overlapped")
+        });
         scheduler.in_flight.remove(&job().key());
         scheduler.tick(clock(6, 0), vec![changed], |j| runs.push(j.key()));
         assert_eq!(runs.len(), 2);
@@ -354,21 +393,44 @@ mod tests {
     #[test]
     fn unix_weekdays_and_day_of_month_union() {
         for expression in ["0 9 * * 0", "0 9 * * 7", "0 9 * * SUN"] {
-            let next = CronSchedule::parse(expression).unwrap().next_after(clock(0, 0)).unwrap();
+            let next = CronSchedule::parse(expression)
+                .unwrap()
+                .next_after(clock(0, 0))
+                .unwrap();
             assert_eq!(next, Utc.with_ymd_and_hms(2026, 11, 1, 9, 0, 0).unwrap());
         }
-        let next = CronSchedule::parse("0 9 1 * MON-FRI").unwrap().next_after(clock(0, 0)).unwrap();
+        let next = CronSchedule::parse("0 9 1 * MON-FRI")
+            .unwrap()
+            .next_after(clock(0, 0))
+            .unwrap();
         assert_eq!(next, Utc.with_ymd_and_hms(2026, 10, 27, 9, 0, 0).unwrap());
-        assert_eq!(CronSchedule::parse("0 9 * * 1-5/2").unwrap().next_after(clock(0, 0)).unwrap(),
-                   Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap());
-        for expression in ["* * * * 8", "* * * * */0", "* * * * 5-1", "@daily", "* * * * * *"] {
+        assert_eq!(
+            CronSchedule::parse("0 9 * * 1-5/2")
+                .unwrap()
+                .next_after(clock(0, 0))
+                .unwrap(),
+            Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap()
+        );
+        for expression in [
+            "* * * * 8",
+            "* * * * */0",
+            "* * * * 5-1",
+            "@daily",
+            "* * * * * *",
+        ] {
             assert!(CronSchedule::parse(expression).is_err(), "{expression}");
         }
     }
 
     #[test]
     fn tick_configuration_defaults_safely() {
-        for value in [None, Some("bad"), Some("0"), Some("-1"), Some("18446744073709551615")] {
+        for value in [
+            None,
+            Some("bad"),
+            Some("0"),
+            Some("-1"),
+            Some("18446744073709551615"),
+        ] {
             assert_eq!(tick_seconds(value), 30);
         }
         assert_eq!(tick_seconds(Some("1")), 1);
