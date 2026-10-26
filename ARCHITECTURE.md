@@ -39,6 +39,7 @@
   - принимает артефакты от клиента (`pushit deploy`: архив `app.wasm` + `dist/` + `pushit.yaml`) → регистрация ревизии → роут. Сборка на ВМ отсутствует — тулчейнов (rustup/node) на ней нет
   - HTTP-роутер: домен → приложение; `/_fn/*` → инстанс компонента; остальное → статика
   - host-функции: подаёт env/secrets, ограничивает capabilities по манифесту, fuel/timeout на вызов
+  - cron-планировщик: перечитывает активные манифесты, вызывает GET компонента по UTC-расписанию без отдельного процесса; [контракт](docs/cron.md)
   - сам под systemd (единственный unit платформы)
 - **Caddy** — контейнер: reverse proxy, TLS, forward-auth к Keycloak.
 - **Keycloak** — контейнер: realm, OIDC.
@@ -127,6 +128,7 @@ pushit deploy (на машине разработчика или в CI):
 - Запрос: `Caddy → controller → match domain → instantiate component (или тёплый инстанс) → handler(req) → ответ`. Cold start ~1–5мс.
 - Rollback = переключить роут на предыдущую ревизию (артефакты ревизий на диске, история в SQLite).
 - Root-манифест `apps:` обрабатывает CLI: sync репозиториев → локальная сборка → deploy. Серверного git-sync loop нет; манифест не заменяет резервную копию состояния платформы.
+- Ревизия хранит SHA-256 digest `app.wasm` и отсортированных путей/содержимого `dist/` без генерируемого `config.js`. `plan --artifacts` локально пересобирает и сравнивает с активной ревизией; env/secrets/данные/toolchain не входят в digest. Toolchain закреплён в `rust-toolchain.toml`.
 
 ## Платформенные host-интерфейсы
 
@@ -140,6 +142,7 @@ pushit deploy (на машине разработчика или в CI):
 | `wasi:keyvalue` | Phase 1 (draft, `0.2.0-draft`, store) | **Реализовано**: встроенная NoSQL-БД приложения — embedded redb, один файл `$PUSHIT_DATA/appdata/<app>/local.kv`, `capabilities.kv: [local]`, bucket `get/set/delete/exists/list-keys` (значения — байты, JSON по конвенции); переживает ревизии/rollback. Atomics/batch/watch — по потребности | **Done** |
 | `wasi:sql` | Phase 1 | **Реализовано**: `sqlx::AnyPool` (postgres/mysql/sqlite) + ClickHouse через HTTP-эндпоинт; `capabilities.sql` — логические имена, деплоер привязывает их к источнику в root-манифесте (`sql: {имя: secret:<ключ> \| platform:<глобальный>}`), креды у хоста. Встроенной БД в sql больше нет — внутренняя БД приложения это `wasi:keyvalue` | **Done** |
 | `wasi:logging` | Phase 1 | **Реализовано**: `log(level, ctx, msg)` → строка в per-app лог-файл (`LogStore`), структурные уровни | **Done** |
+| `cron:` (не WASI-интерфейс) | — | Планировщик контроллера вызывает GET компонента с общими env/secrets/capabilities, `PUSHIT_CRON` и синтетической cron-identity; UTC, без catch-up и перекрытия одного job | **Done** |
 | `wasi:messaging` | Phase 2 | — | Не планируется до запроса |
 
 Принцип: берём WIT-спеки draft-пропозалов как есть (не выдумываем свой API) — если спека стандартизируется, компоненты совместимы бесплатно. Побочный эффект: приложение с `blobstore`/`sql` не нуждается в `http_out` к S3/БД и кредах в env — поверхность секретов сужается.
@@ -173,16 +176,15 @@ pushit deploy (на машине разработчика или в CI):
 
 ## MVP-граница
 
-Входит: деплой артефактов через CLI (`pushit deploy`), роутинг по `Host`, instantiate-per-request, env/secrets, SQL/blobstore/logging host-интерфейсы, логи в per-app файл, `hub.*` со списком приложений, Keycloak-логин, wildcard-субдомены.
+Входит: деплой артефактов через CLI (`pushit deploy`), роутинг по `Host`, instantiate-per-request, env/secrets, SQL/blobstore/logging host-интерфейсы, cron-планировщик, логи в per-app файл, `hub.*` со списком приложений, Keycloak-логин, wildcard-субдомены.
 
-Не входит: rollback-кнопки в хабе (rollback только через CLI), тёплый пул, cron, TLS через ACME (внутренний CA или HTTP).
+Не входит: rollback-кнопки в хабе (rollback только через CLI), тёплый пул, TLS через ACME (внутренний CA или HTTP).
 
 ## Открытые вопросы
 
 - ~~Гранулярность `capabilities.http_out`~~ — реализовано: host-фильтр в `send_request` outgoing-handler, хост виден до выполнения запроса.
 - Тёплые инстансы vs instantiate-per-request: начать с instantiate-per-request (проще, ~1–5мс), тёплый пул — при появлении latency-проблем.
 - Fuel/limit: значения по умолчанию для прерывания зависших вызовов; таймаут ответа.
-- Cron/фоновые джобы: манифест `cron:` → контроллер дёргает handler по расписанию. Дешёвое расширение позже.
 - Серверная автоматизация сборки/deploy: пока сборка только на клиенте или в CI. Git-poll/webhook и исполнение build-команд на сервере требуют отдельного решения.
 
 ## Риски

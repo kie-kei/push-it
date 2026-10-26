@@ -75,6 +75,12 @@ jobs:
       - name: Production rejection and real WASM rollback smoke
         run: python3 scripts/security-e2e.py
 
+      - name: Failed deploy isolation, rollback and restart consistency
+        run: python3 scripts/p1-reliability-e2e.py
+
+      - name: Scheduled real WASM component requests
+        run: python3 scripts/cron-e2e.py
+
       - name: Outgoing-HTTP allowlist enforcement smoke
         run: python3 scripts/http-out-e2e.py
 

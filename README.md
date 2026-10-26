@@ -200,6 +200,7 @@ pushit verify myapp --json     # машиночитаемый результат
 pushit verify myapp --url https://myapp.apps.lan   # внешний домен вместо контроллера
 pushit logs myapp --grep error # подстрока
 pushit logs myapp --since 30m  # свежее 30 минут; единицы s/m/h/d
+pushit logs myapp --json       # JSONL: {"line": "...", "epoch": ...}
 ```
 
 `checks:` в pushit.yaml — список `{path, status?, body?}` (status 100–599); без
@@ -216,6 +217,32 @@ pushit logs myapp --since 30m  # свежее 30 минут; единицы s/m/
 эндпоинте без аутентификации или браузер.
 Фильтры `--grep/--since` работают и с `-f`; `--since` сравнивает метку
 `[dД HH:MM:SS]` (UTC) в строках лога, строки без метки не отбрасываются.
+
+### Диагностика, шаблоны и сравнение артефактов
+
+```bash
+pushit doctor --json                      # toolchain, контроллер, авторизация, манифест
+pushit init myapp --template hello        # обычный scaffold (по умолчанию)
+pushit init analytics --template clickhouse-dashboard
+pushit init objects --template s3-browser
+pushit plan --manifest platform.yaml --json
+pushit plan --manifest platform.yaml --artifacts --json
+```
+
+`doctor` завершает работу с ошибкой при `fail`; `warn` не меняет exit code.
+ClickHouse-шаблон требует секрет `CLICKHOUSE_DSN`, S3-шаблон — store `files` в
+`$PUSHIT_DATA/blobstores.yaml`; инструкции находятся в сгенерированном манифесте.
+Обычный `plan` сравнивает конфигурацию; `--artifacts` запускает локальную сборку
+и сравнивает digest WASM/UI с активной версией: `ARTIFACT-MATCH` или
+`ARTIFACT-DRIFT`. Это не проверка переносимости данных.
+
+### Задачи по расписанию
+
+Контроллер поддерживает `cron:` в манифесте: пятизначное UTC-расписание вызывает
+GET непосредственно у активного компонента, с его env/secrets/capabilities.
+Например, `cron: [{name: report, schedule: "0 9 * * *", path: /_cron/report}]`.
+Пропущенные запуски не догоняются, один job не выполняется параллельно сам с
+собой; результаты видны в `pushit logs`. Контракт: [docs/cron.md](docs/cron.md).
 
 ## Структура
 

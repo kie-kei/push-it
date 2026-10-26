@@ -191,7 +191,7 @@ Behavior:
 - **Builds run locally** (the app's own `build.fn`/`build.ui`), never on the server — the controller stays toolchain-free.
 - Apps deploy sequentially; a failed app doesn't stop the rest. Exit code is non-zero and a `N app(s) failed: a, b` line lists them — rerun the same command to retry; redeploys are idempotent.
 - Per-app secrets must exist beforehand (`pushit secret set <app> KEY=V`); deploy fails fast with `missing secrets: …` otherwise.
-- **`pushit plan`** previews without changing anything: per app it reports `CREATE` (new), `DRIFT` (env differs from root manifest, declared secret has no value on the platform), or `up to date`; live apps absent from the root manifest are flagged as orphans. Code changes are invisible to plan — a rebuilt artifact always deploys as a new revision. Run `plan` before `deploy` as the cheap "what will change" check.
+- **`pushit plan`** previews config changes and orphans; `--json` emits one `{apps, drift}` result. Add `--artifacts` to rebuild locally and compare WASM/UI digests with the active version (`ARTIFACT-MATCH` / `ARTIFACT-DRIFT`). Digest excludes generated `dist/config.js`, manifests, env, secrets and data; a match is not proof of state portability.
 
 ## The app contract
 
@@ -220,6 +220,33 @@ build:
   ui: cd ui && npm ci && npm run build   # optional, only if UI needs a build step
   ui_dist: ui/dist
 ```
+
+### Templates and diagnostics
+
+Use `pushit init <dir> --template hello|clickhouse-dashboard|s3-browser`.
+`hello` is the default. For ClickHouse, set the app secret `CLICKHOUSE_DSN`
+before deploy; the scaffold binds SQL `db` to that secret. For S3, configure
+store `files` in the controller's `$PUSHIT_DATA/blobstores.yaml`.
+Run `pushit doctor --json` for local toolchain, server and auth diagnostics;
+`fail` exits nonzero, warnings do not. `pushit logs <app> --json` emits JSONL
+`{line, epoch}` and composes with `--grep`, `--since` and `--follow`.
+
+### Scheduled jobs
+
+```yaml
+cron:
+  - name: report
+    schedule: "0 9 * * *"       # five fields, UTC
+    path: /_cron/report        # default: /_cron/<name>
+```
+
+Implement the path in the component's incoming handler. The controller invokes
+GET directly (not via static routing), using the active revision's normal
+env/secrets/capabilities plus `PUSHIT_CRON=report`, `x-pushit-cron: report` and
+the synthetic `cron` user identity. Jobs refresh within one tick (default 30s),
+skip missed runs/downtime and never overlap the same app/job. Runtime timeout
+still applies. Verify execution in app logs; a successful deploy alone does
+not prove the job ran.
 
 Rules that bite when violated:
 

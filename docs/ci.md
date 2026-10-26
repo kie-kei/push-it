@@ -12,8 +12,11 @@ GitHub Actions запускает один job на pull request, push в `main`
   `bash scripts/scaffold-smoke.sh` — сборка свежего шаблона без WIT registry;
 - `python3 scripts/security-e2e.py` — production-отказы и реальный WASM
   deploy A → B → rollback A, маршруты, config.js и SQL;
+- `python3 scripts/p1-reliability-e2e.py` — отказы деплоя не меняют рабочую
+  ревизию; повторный rollback и рестарт сохраняют консистентность;
+- `python3 scripts/cron-e2e.py` — настоящий запланированный вызов WASM и логи;
 - `python3 scripts/portability-smoke.py` — настоящий CLI deploy одинаковых
-  артефактов на два чистых локальных инстанса, отдельные секреты/SQL и
+  артефактов на два чистых локальных инстанса, совпадающие digest, отдельные секреты/KV и
   HTTP-проверки ([границы проверки](portability.md)).
 
 Версия Rust закреплена на `1.99.1`, оба `Cargo.lock` хранятся в Git.
