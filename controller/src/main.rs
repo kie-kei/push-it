@@ -21,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(cfg.logs_dir())?;
 
     let db = Db::open(&cfg.db_path())?;
+    db.backfill_digests();
     let secrets = Secrets::load(&cfg.age_key_path())?;
     let runtime = Runtime::new(Duration::from_secs(cfg.handler_timeout_secs))?;
     let logs = Arc::new(LogStore::new(cfg.logs_dir())?);
@@ -35,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         auth,
         metrics: Default::default(),
     });
+    tokio::spawn(pushit_controller::cron::run(state.clone()));
 
     tracing::info!("pushit-controller listening on {}", cfg.bind);
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;

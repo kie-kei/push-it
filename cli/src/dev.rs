@@ -256,6 +256,7 @@ async fn handle(
         let mut log_rx = logs.subscribe(app_name);
         let caps = HostCaps {
             artifact_pin: None,
+            completion: None,
             http_out,
             sql_allowed,
             sql_dsns: dsns,

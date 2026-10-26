@@ -421,6 +421,39 @@ impl Db {
         Ok(())
     }
 
+    fn active_snapshot(r: &rusqlite::Row<'_>) -> rusqlite::Result<(App, Revision)> {
+        Ok((
+            App {
+                name: r.get(0)?,
+                domain: r.get(1)?,
+                manifest: r.get(2)?,
+                created_at: r.get(3)?,
+            },
+            Revision {
+                id: r.get(4)?,
+                app: r.get(5)?,
+                artifact_dir: r.get(6)?,
+                created_at: r.get(7)?,
+                active: r.get::<_, i32>(8)? != 0,
+                manifest: r.get(9)?,
+                domain: r.get(10)?,
+                digest: r.get(11)?,
+            },
+        ))
+    }
+
+    pub fn active_apps(&self) -> Result<Vec<(App, Revision)>> {
+        let conn = self.c();
+        let mut statement = conn.prepare(
+            "SELECT a.name,a.domain,a.manifest,a.created_at,
+                    r.id,r.app,r.artifact_dir,r.created_at,r.active,r.manifest,r.domain,r.digest
+             FROM apps a JOIN revisions r ON r.app=a.name AND r.active=1
+             ORDER BY a.name",
+        )?;
+        let rows = statement.query_map([], Self::active_snapshot)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// Resolve routing, artifact and configuration from a single database snapshot.
     pub fn active_app_by_domain(&self, domain: &str) -> Result<Option<(App, Revision)>> {
         Ok(self
@@ -431,26 +464,7 @@ impl Db {
              FROM apps a JOIN revisions r ON r.app=a.name AND r.active=1
              WHERE a.domain=?1 COLLATE NOCASE LIMIT 1",
                 params![domain],
-                |r| {
-                    Ok((
-                        App {
-                            name: r.get(0)?,
-                            domain: r.get(1)?,
-                            manifest: r.get(2)?,
-                            created_at: r.get(3)?,
-                        },
-                        Revision {
-                            id: r.get(4)?,
-                            app: r.get(5)?,
-                            artifact_dir: r.get(6)?,
-                            created_at: r.get(7)?,
-                            active: r.get::<_, i32>(8)? != 0,
-                            manifest: r.get(9)?,
-                            domain: r.get(10)?,
-                            digest: r.get(11)?,
-                        },
-                    ))
-                },
+                Self::active_snapshot,
             )
             .optional()?)
     }
@@ -645,6 +659,26 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn cron_active_apps_returns_only_active_configuration_snapshots() {
+        let db = memory();
+        assert!(db.active_apps().unwrap().is_empty());
+        deploy(&db, "r1");
+        deploy(&db, "r2");
+        db.deploy_revision("b", "b1", "/x/b1", "b.localhost", "name: b").unwrap();
+        let apps = db.active_apps().unwrap();
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0].0.name, "a");
+        assert_eq!(apps[0].1.id, "r2");
+        assert_eq!(Some(apps[0].0.manifest.clone()), apps[0].1.manifest);
+        db.deactivate("a").unwrap();
+        assert_eq!(db.active_apps().unwrap()[0].0.name, "b");
+        db.activate("a", "r1").unwrap();
+        assert_eq!(db.active_apps().unwrap()[0].1.id, "r1");
+        db.delete_app("a").unwrap();
+        assert_eq!(db.active_apps().unwrap().len(), 1);
     }
 
     #[test]
