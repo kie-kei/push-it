@@ -9,7 +9,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 mod dev;
+mod doctor;
 mod profiles;
+mod templates;
 
 /// Thin client for the PushIt controller API.
 #[derive(Parser)]
@@ -70,6 +72,11 @@ enum Cmd {
         /// Path to the root pushit.yaml with an `apps:` section.
         #[arg(long, default_value = "pushit.yaml")]
         manifest: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Build locally and compare artifact content with the active version.
+        #[arg(long)]
+        artifacts: bool,
     },
     /// Print the PushIt app development guide, or install it for agents.
     Skill {
@@ -119,6 +126,11 @@ enum Cmd {
     Delete { app: String },
     /// Tail app logs, or stream them with -f.
     Logs(LogsArgs),
+    /// Diagnose local tools, authentication, and the target controller.
+    Doctor {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args)]
@@ -171,6 +183,9 @@ enum VersionCmd {
 struct InitArgs {
     /// App name for pushit.yaml (default: directory name).
     name: Option<String>,
+    /// Scaffold hello, clickhouse-dashboard, or s3-browser.
+    #[arg(long)]
+    template: Option<String>,
 }
 
 #[derive(Args)]
@@ -226,6 +241,9 @@ struct LogsArgs {
     /// Show only lines containing this substring.
     #[arg(long)]
     grep: Option<String>,
+    /// Emit one JSON object per log line.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -341,7 +359,12 @@ fn main() -> Result<()> {
             }
         },
         Cmd::Profile { cmd } => profile_cmd(cmd),
-        Cmd::Plan { manifest } => plan_root(
+        Cmd::Doctor { json } => doctor::run(&server, &client, json),
+        Cmd::Plan {
+            manifest,
+            json,
+            artifacts,
+        } => plan_root(
             &server,
             &client,
             &DeployArgs {
@@ -349,6 +372,8 @@ fn main() -> Result<()> {
                 wasm: None,
                 dist: None,
             },
+            json,
+            artifacts,
         ),
         Cmd::Build(a) => build(&a),
         Cmd::Dev(a) => dev::run(&a),
@@ -526,6 +551,17 @@ fn build(args: &BuildArgs) -> Result<()> {
 
 /// Run `build.fn`/`build.ui` from the manifest + verify artifacts.
 fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
+    run_build_steps_with_output(manifest, base, false)
+}
+
+fn run_build_steps_with_output(
+    manifest: &serde_yaml::Value,
+    base: &Path,
+    stderr: bool,
+) -> Result<()> {
+    macro_rules! report {
+        ($($arg:tt)*) => { if stderr { eprintln!($($arg)*); } else { println!($($arg)*); } };
+    }
     let mut ran_any = false;
     for key in ["fn", "ui"] {
         let Some(cmd) = manifest
@@ -536,11 +572,16 @@ fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
             continue;
         };
         ran_any = true;
-        println!("==> build.{key}: {cmd}");
+        report!("==> build.{key}: {cmd}");
         let status = std::process::Command::new("sh")
             .arg("-c")
             .arg(cmd)
             .current_dir(base)
+            .stdout(if stderr {
+                std::process::Stdio::from(std::io::stderr())
+            } else {
+                std::process::Stdio::inherit()
+            })
             .status()
             .with_context(|| format!("spawn build.{key}"))?;
         if !status.success() {
@@ -548,7 +589,7 @@ fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
         }
     }
     if !ran_any {
-        println!("no build.fn/build.ui commands in pushit.yaml — artifacts must exist already");
+        report!("no build.fn/build.ui commands in pushit.yaml — artifacts must exist already");
     }
 
     // verify artifacts: wasm via entry/find_wasm, dist via build.ui_dist
@@ -556,12 +597,12 @@ fn run_build_steps(manifest: &serde_yaml::Value, base: &Path) -> Result<()> {
         .filter(|p| p.is_file())
         .or_else(|| find_wasm(base).ok())
         .ok_or_else(|| anyhow!("build done but no wasm found — check `entry` in pushit.yaml"))?;
-    println!("ok wasm: {}", wasm.display());
+    report!("ok wasm: {}", wasm.display());
     if let Some(d) = manifest_path(&manifest, "ui_dist", base) {
         if d.is_dir() {
-            println!("ok dist: {}", d.display());
+            report!("ok dist: {}", d.display());
         } else {
-            println!(
+            report!(
                 "warn: ui_dist {} not found — app will deploy without UI",
                 d.display()
             );
@@ -787,7 +828,13 @@ fn sync_repo(repo: &str, git_ref: Option<&str>, dir: &Path) -> Result<()> {
 
 /// `pushit plan`: diff root manifest (+ synced repos) against live state.
 /// Read-only: create / env-drift / missing-secrets / orphan detection.
-fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
+fn plan_root(
+    server: &str,
+    client: &Client,
+    args: &DeployArgs,
+    json: bool,
+    artifacts: bool,
+) -> Result<()> {
     let manifest_text = fs::read_to_string(&args.manifest)
         .with_context(|| format!("read {}", args.manifest.display()))?;
     let manifest: serde_yaml::Value =
@@ -818,7 +865,7 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
     // orphan detection runs after the loop: compare against real app names
     // (root keys are cache dir names and may differ from app names)
 
-    let mut drift = 0usize;
+    let mut entries: Vec<PlanApp> = Vec::new();
     let mut expected: Vec<String> = Vec::new();
     for (key, cfg) in apps {
         let key = key
@@ -834,10 +881,15 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             .and_then(|v| v.as_str())
             .unwrap_or("pushit.yaml");
         let dir = cache.join(key);
-        print!("{key}: ");
+        let mut entry = PlanApp {
+            key: key.into(),
+            app: None,
+            status: "error",
+            changes: Vec::new(),
+        };
         if let Err(e) = sync_repo(repo, git_ref, &dir) {
-            println!("ERROR sync: {e:#}");
-            drift += 1;
+            entry.changes.push(format!("ERROR sync: {e:#}"));
+            entries.push(entry);
             continue;
         }
         let m: serde_yaml::Value = match fs::read_to_string(dir.join(inner))
@@ -846,29 +898,47 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
         {
             Ok(m) => m,
             Err(e) => {
-                println!("ERROR manifest: {e:#}");
-                drift += 1;
+                entry.changes.push(format!("ERROR manifest: {e:#}"));
+                entries.push(entry);
                 continue;
             }
         };
-        let app_name = m
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("apps.{key}: inner manifest missing `name`"))?;
+        let Some(app_name) = m.get("name").and_then(|v| v.as_str()) else {
+            entry.changes.push(format!(
+                "ERROR manifest: apps.{key}: inner manifest missing `name`"
+            ));
+            entries.push(entry);
+            continue;
+        };
+        entry.app = Some(app_name.into());
 
         // env: mandatory at deploy time, same rule as deploy
         let env = match cfg.get("env") {
             Some(v) if v.as_mapping().is_some() => v,
             _ => {
-                println!("ERROR explicit `env:` required (deploy would fail)");
-                drift += 1;
+                entry
+                    .changes
+                    .push("ERROR explicit `env:` required (deploy would fail)".into());
+                entries.push(entry);
                 continue;
             }
         };
 
         if !live_names.iter().any(|n| n == app_name) {
-            println!("CREATE (new app)");
-            drift += 1;
+            entry.status = "create";
+            entry.changes.push("CREATE (new app)".into());
+            if artifacts {
+                match local_artifact_digest(&m, manifest_base(&dir.join(inner))) {
+                    Ok(_) => entry
+                        .changes
+                        .push("ARTIFACT-DRIFT (no active version)".into()),
+                    Err(e) => {
+                        entry.status = "error";
+                        entry.changes.push(format!("ERROR artifacts: {e:#}"));
+                    }
+                }
+            }
+            entries.push(entry);
             expected.push(app_name.to_string());
             continue;
         }
@@ -952,27 +1022,113 @@ fn plan_root(server: &str, client: &Client, args: &DeployArgs) -> Result<()> {
             }
         }
 
-        if changes.is_empty() {
-            println!("up to date (config; code changes deploy as a new revision)");
-        } else {
-            drift += 1;
-            println!("DRIFT:");
-            for c in changes {
-                println!("    {c}");
+        let config_drift = !changes.is_empty();
+        let mut artifact_error = false;
+        let mut artifact_drift = false;
+        if artifacts {
+            match local_artifact_digest(&m, manifest_base(&dir.join(inner))) {
+                Ok(digest) => {
+                    artifact_drift = !active_artifact_matches(&detail, &digest);
+                    changes.push(
+                        if artifact_drift {
+                            "ARTIFACT-DRIFT"
+                        } else {
+                            "ARTIFACT-MATCH"
+                        }
+                        .into(),
+                    );
+                }
+                Err(e) => {
+                    artifact_error = true;
+                    changes.push(format!("ERROR artifacts: {e:#}"));
+                }
             }
         }
+        entry.status = if artifact_error {
+            "error"
+        } else if config_drift || artifact_drift {
+            "drift"
+        } else {
+            "up-to-date"
+        };
+        entry.changes = changes;
+        entries.push(entry);
     }
     for name in &live_names {
         if !expected.iter().any(|e| e == name) {
-            println!("~ {name}: live on platform but NOT in root manifest (orphan — delete manually if unintended)");
+            entries.push(PlanApp { key: name.clone(), app: Some(name.clone()), status: "orphan", changes: vec!["live on platform but NOT in root manifest (orphan — delete manually if unintended)".into()] });
         }
     }
-    if drift == 0 {
-        println!("plan: no drift");
+    let report = PlanReport::new(entries);
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
     } else {
-        println!("plan: {drift} app(s) with changes/errors");
+        for app in &report.apps {
+            match app.status {
+                "orphan" => println!("~ {}: {}", app.key, app.changes.join("; ")),
+                "up-to-date" => println!(
+                    "{}: up to date (config; code changes deploy as a new revision){}",
+                    app.key,
+                    if artifacts { " ARTIFACT-MATCH" } else { "" }
+                ),
+                "drift" => {
+                    println!("{}: DRIFT:", app.key);
+                    for change in &app.changes {
+                        println!("    {change}");
+                    }
+                }
+                _ => println!("{}: {}", app.key, app.changes.join("; ")),
+            }
+        }
+        if report.drift == 0 {
+            println!("plan: no drift");
+        } else {
+            println!("plan: {} app(s) with changes/errors", report.drift);
+        }
     }
     Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct PlanApp {
+    key: String,
+    app: Option<String>,
+    status: &'static str,
+    changes: Vec<String>,
+}
+#[derive(serde::Serialize)]
+struct PlanReport {
+    apps: Vec<PlanApp>,
+    drift: usize,
+}
+impl PlanReport {
+    fn new(apps: Vec<PlanApp>) -> Self {
+        let drift = apps
+            .iter()
+            .filter(|a| matches!(a.status, "create" | "drift" | "error"))
+            .count();
+        Self { apps, drift }
+    }
+}
+fn active_artifact_matches(detail: &serde_json::Value, digest: &str) -> bool {
+    detail
+        .get("revisions")
+        .and_then(|v| v.as_array())
+        .is_some_and(|revisions| {
+            revisions.iter().any(|r| {
+                r.get("active").and_then(|v| v.as_bool()) == Some(true)
+                    && r.get("digest").and_then(|v| v.as_str()) == Some(digest)
+            })
+        })
+}
+fn local_artifact_digest(manifest: &serde_yaml::Value, base: &Path) -> Result<String> {
+    run_build_steps_with_output(manifest, base, true)?;
+    let wasm = manifest_path(manifest, "entry", base)
+        .filter(|p| p.is_file())
+        .or_else(|| find_wasm(base).ok())
+        .context("no built wasm artifact")?;
+    let dist = manifest_path(manifest, "ui_dist", base).filter(|p| p.is_dir());
+    pushit_controller::digest::artifact_digest(&wasm, dist.as_deref())
 }
 
 fn deploy_one(
@@ -1530,7 +1686,7 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
             if let Some(data) = line.strip_prefix("data:") {
                 let data = data.trim_start();
                 if keep(data) {
-                    writeln!(out, "{data}")?;
+                    write_log_line(&mut out, data, args.json)?;
                     out.flush()?;
                 }
             }
@@ -1552,8 +1708,21 @@ fn logs(server: &str, client: &Client, args: LogsArgs) -> Result<()> {
             .map(|a| a.iter().filter_map(|l| l.as_str()).collect::<Vec<_>>())
             .unwrap_or(empty);
         for line in lines.iter().filter(|l| keep(l)) {
-            println!("{line}");
+            write_log_line(&mut std::io::stdout().lock(), line, args.json)?;
         }
+    }
+    Ok(())
+}
+
+fn write_log_line(out: &mut impl Write, line: &str, json: bool) -> Result<()> {
+    if json {
+        serde_json::to_writer(
+            &mut *out,
+            &serde_json::json!({"line": line, "epoch": log_line_epoch(line)}),
+        )?;
+        writeln!(out)?;
+    } else {
+        writeln!(out, "{line}")?;
     }
     Ok(())
 }
@@ -1913,6 +2082,7 @@ const INIT_INDEX_HTML: &str = r#"<!doctype html>
 "#;
 
 fn init(args: InitArgs) -> Result<()> {
+    let template = templates::get(args.template.as_deref().unwrap_or("hello"))?;
     let dir = std::env::current_dir()?;
     let has_name = args.name.is_some();
     let name = args.name.unwrap_or_else(|| {
@@ -1946,23 +2116,60 @@ fn init(args: InitArgs) -> Result<()> {
 
     write_new(
         "pushit.yaml",
-        INIT_MANIFEST
+        template
+            .map_or(INIT_MANIFEST, |t| t.manifest)
             .replace("{name}", &name)
             .replace("{crate_name}", &crate_name),
     )?;
     write_new(
         "fn/Cargo.toml",
-        INIT_FN_TOML
+        template
+            .map_or_else(
+                || INIT_FN_TOML.to_string(),
+                |t| {
+                    INIT_FN_TOML
+                        .replace(
+                            "[workspace]",
+                            &format!(
+                                "\"wasi:{}\" = {{ path = \"wit/deps/{}\" }}\n\n[workspace]",
+                                t.package, t.package
+                            ),
+                        )
+                        .replace(
+                            "wit-bindgen-rt = \"0.44\"",
+                            "wit-bindgen-rt = \"0.44\"\nserde_json = \"1\"",
+                        )
+                },
+            )
             .replace("{crate_name}", &crate_name)
             .replace("{name}", &name),
     )?;
-    write_new("fn/wit/world.wit", INIT_WIT.replace("{name}", &name))?;
+    write_new(
+        "fn/wit/world.wit",
+        template
+            .map_or(INIT_WIT, |t| t.world)
+            .replace("{name}", &name),
+    )?;
     for (path, content) in INIT_WIT_DEPS {
         write_new(&format!("fn/wit/deps/{path}"), (*content).to_string())?;
     }
+    if let Some(t) = template {
+        write_new("fn/Cargo-component.lock", "version = 1\n".into())?;
+        for (path, content) in t.deps {
+            write_new(&format!("fn/wit/deps/{path}"), (*content).to_string())?;
+        }
+    }
     write_new("fn/wit/NOTICE.md", INIT_WIT_NOTICE.to_string())?;
-    write_new("fn/src/lib.rs", INIT_LIB_RS.to_string())?;
-    write_new("ui/index.html", INIT_INDEX_HTML.replace("{name}", &name))?;
+    write_new(
+        "fn/src/lib.rs",
+        template.map_or(INIT_LIB_RS, |t| t.code).to_string(),
+    )?;
+    write_new(
+        "ui/index.html",
+        template
+            .map_or(INIT_INDEX_HTML, |t| t.html)
+            .replace("{name}", &name),
+    )?;
     write_new(
         "fn/.cargo/config.toml",
         "[build]\ntarget = \"wasm32-wasip1\"\n".to_string(),
@@ -2312,5 +2519,58 @@ mod verify_logs_tests {
             !reqs[1].to_ascii_lowercase().contains("x-pushit-dev"),
             "probe request leaked the dev header"
         );
+    }
+}
+
+#[cfg(test)]
+mod logs_json_tests {
+    use super::*;
+    #[test]
+    fn lines_are_json_escaped_and_unstamped_epoch_is_null() {
+        for (line, epoch) in [
+            ("[d1 01:02:03] \"hello\"\nworld", Some(90123)),
+            ("plain", None),
+        ] {
+            let mut out = Vec::new();
+            write_log_line(&mut out, line, true).unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+            assert_eq!(value["line"], line);
+            assert_eq!(value["epoch"], serde_json::json!(epoch));
+            assert_eq!(out.iter().filter(|&&b| b == b'\n').count(), 1);
+        }
+    }
+}
+#[cfg(test)]
+mod plan_json_tests {
+    use super::*;
+    #[test]
+    fn aggregation_preserves_errors_and_excludes_orphans_from_drift() {
+        let apps = ["create", "drift", "error", "up-to-date", "orphan"]
+            .into_iter()
+            .map(|status| PlanApp {
+                key: status.into(),
+                app: None,
+                status,
+                changes: vec!["detail".into()],
+            })
+            .collect();
+        let value = serde_json::to_value(PlanReport::new(apps)).unwrap();
+        assert_eq!(value["drift"], 3);
+        assert_eq!(value["apps"][2]["app"], serde_json::Value::Null);
+        assert_eq!(value["apps"][2]["changes"][0], "detail");
+    }
+    #[test]
+    fn artifact_match_requires_active_revision_with_digest() {
+        for detail in [
+            serde_json::json!({}),
+            serde_json::json!({"revisions":[{"active":true}]}),
+            serde_json::json!({"revisions":[{"active":false,"digest":"sha256:a"}]}),
+        ] {
+            assert!(!active_artifact_matches(&detail, "sha256:a"));
+        }
+        assert!(active_artifact_matches(
+            &serde_json::json!({"revisions":[{"active":true,"digest":"sha256:a"}]}),
+            "sha256:a"
+        ));
     }
 }

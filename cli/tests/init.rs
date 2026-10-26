@@ -149,3 +149,42 @@ fn scaffold_build_target_and_deploy_entry_match_cargo_component_output() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn capability_templates_scaffold_and_unknown_names_do_not_write() {
+    let root = std::env::temp_dir().join(format!("pushit-init-templates-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    for (template, capability, endpoint) in [
+        ("clickhouse-dashboard", "sql", "tables"),
+        ("s3-browser", "blobstore", "objects"),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_pushit"))
+            .args(["init", template, "--template", template])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let app = root.join(template);
+        let manifest = fs::read_to_string(app.join("pushit.yaml")).unwrap();
+        assert!(manifest.contains(&format!("{capability}: [")));
+        assert!(manifest.contains(&format!("/_fn/{endpoint}")));
+        assert!(fs::read_to_string(app.join("fn/wit/world.wit"))
+            .unwrap()
+            .contains(&format!("import wasi:{capability}/")));
+        assert!(fs::read_to_string(app.join("ui/index.html"))
+            .unwrap()
+            .contains(&format!("fetch('/_fn/{endpoint}')")));
+        pushit_controller::manifest::Manifest::parse(&manifest).unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_pushit"))
+        .args(["init", "unknown-app", "--template", "unknown"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!root.join("unknown-app").exists());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("hello, clickhouse-dashboard, s3-browser")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
