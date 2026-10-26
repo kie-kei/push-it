@@ -4,7 +4,21 @@
 
 ## Текущая база
 
-В `main` уже есть CLI `init`, `build`, `dev`, `deploy`, `verify`, `plan`, `status`, `logs`, `rollback`, `login` и профили подключений; скилл агента и шаблон приложения; WASM-runtime со статичным UI, keyvalue (встроенная NoSQL-БД приложения)/SQL/blobstore/logging host-интерфейсы. Root-манифест `apps:` синкает репозитории, собирает и деплоит приложения **на стороне клиента**, контроллер принимает артефакты. `pushit login` использует браузерный вход и сохраняемый долгоживущий токен, не refresh-токен.
+В `main` уже есть CLI `init`, `build`, `dev`, `deploy`, `verify`, `plan`, `status`, `logs`, `rollback`, `login` и профили подключений; скилл агента и шаблон приложения; WASM-runtime со статичным UI, keyvalue (встроенная NoSQL-БД приложения)/SQL/blobstore/logging host-интерфейсы. Root-манифест `apps:` синкает репозитории, собирает и деплоит приложения **на стороне клиента**, контроллер принимает артефакты. `pushit login` сохраняет API-токен: браузерный вход через Keycloak для OIDC или пароль владельца для standalone; это не refresh-токен.
+
+В `main` также есть standalone owner auth полного контроллера без обязательных
+Keycloak/Caddy: `local` ограничен HTTP loopback и `*.localhost`, а `builtin`
+использует фиксированный внешний HTTPS base origin и reverse proxy на том же
+хосте/в том же сетевом пространстве имён; backend — только числовой loopback HTTP.
+Оба режима сохраняют хаб, поддомены приложений, деплои, версии и секреты;
+это не `pushit dev` и не отдельный runtime без контроллера. Cookie host-only,
+в builtin — Secure `__Host-`; owner CLI-токены действуют 30 дней, OIDC-токены —
+примерно год. Login сохраняет токен в выбранный/активный профиль, без профиля —
+в legacy-файл. OIDC остаётся Keycloak-специфичным путём.
+Контракты и ограничения: [local](docs/standalone-local-auth.md),
+[builtin/proxy](docs/standalone-proxy-auth.md). Протокольные проверки и nginx smoke
+с реальным TLS не являются проверкой cookie-prefix enforcement в браузерном
+движке; такая браузерная QA остаётся открытой.
 
 Это описание реализованных поверхностей, не security/reliability sign-off. Изменения в открытых PR не считаются частью `main`. Текущие команды и ограничения: [README](README.md), [скилл](skills/pushit-app/SKILL.md), [архитектура](ARCHITECTURE.md).
 
@@ -59,7 +73,7 @@ Backup/restore платформы — ответственность инфра�
 
 ## Остальной backlog: по подтверждённой потребности
 
-- Standalone production-запуск без контроллера. Уже есть локальный `pushit dev`, но это не production-контракт с auth, TLS, секретами и эксплуатацией. Отдельный бинарь на базе host-кода или другой совместимый runtime — варианты для оценки, предпочтительный вариант пока не выбран.
+- Production/runtime-запуск приложения **без контроллера** — отдельная возможная потребность, не backlog уже реализованных standalone `local`/`builtin` режимов полного контроллера. `pushit dev` остаётся локальной отладкой, не production-контрактом. Отдельный бинарь на базе host-кода или другой совместимый runtime — варианты для оценки; предпочтительный вариант пока не выбран и требует отдельного архитектурного решения.
 - Серверный git-poll/webhook. Сейчас root-манифест обрабатывает клиент; перенос build-команд на сервер требует отдельного архитектурного и security-решения.
 - Фильтр хаба по Keycloak-группам, RBAC на приложения.
 - Request-id correlation и фильтр уровня в `pushit logs`.
