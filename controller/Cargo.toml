@@ -41,6 +41,7 @@ argon2 = "0.5"
 serde_urlencoded = "0.7"
 rand = "0.8"
 chrono = { version = "0.4", default-features = false }
+cron = "0.15"
 
 [dev-dependencies]
 tempfile = "3"

@@ -912,6 +912,54 @@ fn serve_static(rev: &Revision, uri: &http::Uri) -> Response {
         .unwrap()
 }
 
+pub(crate) fn resolve_call_env_caps(
+    s: &AppState,
+    app: &App,
+    manifest: &Manifest,
+) -> Result<(Vec<(String, String)>, crate::runtime::HostCaps)> {
+    let mut env: Vec<(String, String)> = manifest
+        .env
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    for k in &manifest.secrets {
+        let enc = s.db.get_secret_enc(&app.name, k)?
+            .with_context(|| format!("missing app secret '{k}'"))?;
+        let value = s.secrets.decrypt(&enc)
+            .with_context(|| format!("decrypt app secret '{k}'"))?;
+        env.push((k.clone(), String::from_utf8_lossy(&value).into_owned()));
+    }
+    let (sql_allowed, sql_dsns) =
+        crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |name| {
+            let binding = manifest.sql_bindings.get(name)?;
+            let (source, key) = binding.split_once(':')?;
+            let enc = match source {
+                "secret" => s.db.get_secret_enc(&app.name, key),
+                "platform" => s.db.get_global_secret(key),
+                _ => return None,
+            };
+            enc.ok()
+                .flatten()
+                .and_then(|enc| s.secrets.decrypt(&enc).ok())
+                .map(|v| String::from_utf8_lossy(&v).into_owned())
+        })?;
+    let caps = crate::runtime::HostCaps {
+        artifact_pin: None,
+        completion: None,
+        http_out: manifest.http_out_policy(),
+        sql_allowed,
+        sql_dsns,
+        kv_allowed: manifest.capabilities.kv.clone(),
+        blob_allowed: manifest.capabilities.blobstore.clone(),
+        blob_stores: crate::blob_host::load_blobstores(&s.cfg.data_dir)?,
+        log: crate::log_host::LogCtx {
+            app: app.name.clone(),
+            logs: s.logs.clone(),
+        },
+    };
+    Ok((env, caps))
+}
+
 async fn call_fn(
     s: &AppState,
     app: &App,
@@ -924,19 +972,11 @@ async fn call_fn(
         return err500(anyhow::anyhow!("stored manifest fails to parse"));
     };
 
-    // resolve env: manifest env + decrypted secrets
-    let mut env: Vec<(String, String)> = manifest
-        .env
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    for k in &manifest.secrets {
-        if let Ok(Some(enc)) = s.db.get_secret_enc(&app.name, k) {
-            if let Ok(v) = s.secrets.decrypt(&enc) {
-                env.push((k.clone(), String::from_utf8_lossy(&v).into_owned()));
-            }
-        }
-    }
+    let (env, mut caps) = match resolve_call_env_caps(s, app, &manifest) {
+        Ok(resolved) => resolved,
+        Err(error) => return err500(error),
+    };
+    caps.artifact_pin = Some(artifact_pin);
 
     let (parts, body) = req.into_parts();
     let bytes = match to_bytes(body, 64 << 20).await {
@@ -982,42 +1022,6 @@ async fn call_fn(
     let hreq = match hreq.body(Full::new(bytes)) {
         Ok(r) => r,
         Err(e) => return err500(e.into()),
-    };
-    let (sql_allowed, sql_dsns) = {
-        let bindings = &manifest.sql_bindings;
-        match crate::sql_host::resolve_grants(&manifest.capabilities.sql, &app.name, |name| {
-            let b = bindings.get(name)?;
-            let (src, key) = b.split_once(':')?;
-            let enc = match src {
-                "secret" => s.db.get_secret_enc(&app.name, key),
-                "platform" => s.db.get_global_secret(key),
-                _ => return None,
-            };
-            enc.ok()
-                .flatten()
-                .and_then(|enc| s.secrets.decrypt(&enc).ok())
-                .map(|v| String::from_utf8_lossy(&v).into_owned())
-        }) {
-            Ok(r) => r,
-            Err(e) => return err500(e),
-        }
-    };
-    let blob_stores = match crate::blob_host::load_blobstores(&s.cfg.data_dir) {
-        Ok(m) => m,
-        Err(e) => return err500(e),
-    };
-    let caps = crate::runtime::HostCaps {
-        artifact_pin: Some(artifact_pin),
-        http_out: manifest.http_out_policy(),
-        sql_allowed,
-        sql_dsns,
-        kv_allowed: manifest.capabilities.kv.clone(),
-        blob_allowed: manifest.capabilities.blobstore.clone(),
-        blob_stores,
-        log: crate::log_host::LogCtx {
-            app: app.name.clone(),
-            logs: s.logs.clone(),
-        },
     };
     match s
         .runtime

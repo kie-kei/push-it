@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod blob_host;
 pub mod config;
+pub mod cron;
 pub mod db;
 pub mod digest;
 pub mod kv_host;

@@ -26,6 +26,8 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 pub struct HostCaps {
     /// Optional controller artifact lease; standalone dev has no version deletion.
     pub artifact_pin: Option<Arc<tokio::sync::OwnedRwLockReadGuard<()>>>,
+    /// Dropped only when the guest stops, including timeout/error paths.
+    pub completion: Option<tokio::sync::oneshot::Sender<()>>,
     /// Outgoing-HTTP policy: denied, or an allowlist checked per request
     /// against the authority host (see `manifest::HostFilter`).
     pub http_out: HttpOut,
@@ -218,6 +220,7 @@ impl Runtime {
             // A guest may outlive its response headers/body or an HTTP timeout.
             // Keep its version pinned until the Store and guest actually stop.
             let _artifact_pin = artifact_pin;
+            let _completion = caps.completion;
             let proxy = pre.instantiate_async(&mut store).await?;
             proxy
                 .wasi_http_incoming_handler()

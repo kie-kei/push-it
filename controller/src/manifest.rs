@@ -25,6 +25,33 @@ pub struct Manifest {
     pub sql_bindings: BTreeMap<String, String>,
     #[serde(default)]
     pub build: Build,
+    #[serde(default)]
+    pub cron: Vec<CronEntry>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(from = "CronSpec")]
+pub struct CronEntry {
+    pub name: String,
+    pub schedule: String,
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+struct CronSpec {
+    name: String,
+    schedule: String,
+    path: Option<String>,
+}
+
+impl From<CronSpec> for CronEntry {
+    fn from(spec: CronSpec) -> Self {
+        Self {
+            path: spec.path.unwrap_or_else(|| format!("/_cron/{}", spec.name)),
+            name: spec.name,
+            schedule: spec.schedule,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -169,6 +196,26 @@ impl Manifest {
             // Fail at deploy time, not at the first denied request.
             HostFilter::parse(entries)?;
         }
+        let mut names = std::collections::HashSet::new();
+        for entry in &m.cron {
+            anyhow::ensure!(
+                !entry.name.contains('.') && crate::config::valid_dns_name(&entry.name),
+                "cron: name '{}' must be a DNS label (a-z, 0-9, '-', 1-63 characters)",
+                entry.name
+            );
+            anyhow::ensure!(
+                names.insert(&entry.name),
+                "cron: duplicate name '{}'",
+                entry.name
+            );
+            crate::cron::CronSchedule::parse(&entry.schedule)
+                .with_context(|| format!("cron '{}': invalid schedule", entry.name))?;
+            anyhow::ensure!(
+                entry.path.starts_with('/') && entry.path.parse::<hyper::Uri>().is_ok(),
+                "cron '{}': path must start with '/' and be a valid request URI",
+                entry.name
+            );
+        }
         Ok(m)
     }
     fn validate_name(&self, name: &str) -> anyhow::Result<()> {
@@ -214,6 +261,40 @@ mod tests {
         let m = Manifest::parse("name: my-app\n").unwrap();
         assert_eq!(m.name, "my-app");
         assert_eq!(m.http_out_policy(), HttpOut::Denied);
+    }
+
+    #[test]
+    fn parses_cron_and_defaults_path() {
+        let m = Manifest::parse(
+            "name: a\ncron:\n  - name: report\n    schedule: '0 9 * * *'\n",
+        )
+        .unwrap();
+        assert_eq!(m.cron[0].path, "/_cron/report");
+        let m = Manifest::parse(
+            "name: a\ncron:\n  - name: auth\n    schedule: '* * * * *'\n    path: /_fn/log\n",
+        )
+        .unwrap();
+        assert_eq!(m.cron[0].path, "/_fn/log");
+        assert!(Manifest::parse("name: a\ncron: []\n").unwrap().cron.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_cron() {
+        for entry in [
+            "- name: tick\n    schedule: '* * * * *'\n  - name: tick\n    schedule: '* * * * *'",
+            "- name: Bad\n    schedule: '* * * * *'",
+            "- name: -bad\n    schedule: '* * * * *'",
+            "- name: a.b\n    schedule: '* * * * *'",
+            "- name: tick\n    schedule: nonsense",
+            "- name: tick\n    schedule: '0 * * * * *'",
+            "- name: tick\n    schedule: '* * * * *'\n    path: missing-slash",
+            "- name: tick\n    schedule: '* * * * *'\n    path: ''",
+            "- name: tick",
+            "- schedule: '* * * * *'",
+        ] {
+            assert!(Manifest::parse(&format!("name: a\ncron:\n  {entry}\n")).is_err(), "{entry}");
+        }
+        assert!(Manifest::parse("name: a\ncron: {name: tick}\n").is_err());
     }
 
     #[test]
